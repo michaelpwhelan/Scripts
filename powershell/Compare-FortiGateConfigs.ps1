@@ -8,10 +8,6 @@
     Unchanged sections are skipped. An optional section filter limits output to specific
     sections by name. Console output is also written to a timestamped log file.
 
-.NOTES
-    Author:       Michael Whelan
-    Created:      2026-03-06
-
 .EXAMPLE
     .\Compare-FortiGateConfigs.ps1
     Compares the two files defined in $Config and prints the diff to the console.
