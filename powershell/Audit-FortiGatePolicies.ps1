@@ -33,10 +33,6 @@
     be generated for stakeholder distribution.  A color-coded summary is printed
     to the console.
 
-.NOTES
-    Author:       Michael Whelan
-    Created:      2026-03-11
-    Dependencies: None (stdlib only). Requires a FortiGate .conf backup file.
 
 .PARAMETER ConfigFile
     Path to a FortiGate .conf backup file. Overrides $Config.ConfigFile.
