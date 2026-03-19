@@ -470,6 +470,7 @@ function Get-SeverityFromFortiLevel {
 
 function Get-SeverityFromText {
     param([string]$Text)
+    if (-not $Text) { return 'Low' }
     $t = $Text.ToLower()
     if ($t -match 'critical|emergency|fatal') { return 'Critical' }
     if ($t -match '\berror\b|\bfail\b|denied|block|drop') { return 'High' }
@@ -1026,6 +1027,7 @@ function Invoke-FilterEvents {
         [System.Collections.Generic.List[object]]$Events,
         [string]$Query
     )
+    if (-not $Events) { return [System.Collections.Generic.List[object]]::new() }
     if ([string]::IsNullOrWhiteSpace($Query)) { return $Events }
 
     # Split on pipe for pipeline operators
@@ -1036,7 +1038,7 @@ function Invoke-FilterEvents {
     # Apply filter
     $filtered = [System.Collections.Generic.List[object]]::new()
     if ([string]::IsNullOrWhiteSpace($filterPart)) {
-        $filtered.AddRange($Events)
+        if ($Events.Count -gt 0) { $filtered.AddRange($Events) }
     } else {
         $conditions = Parse-FilterConditions $filterPart
         foreach ($event in $Events) {
@@ -1093,15 +1095,17 @@ function Test-FilterMatch {
 
 function Get-EventFieldValue {
     param($Event, [string]$Field)
+    if (-not $Event -or -not $Field) { return $null }
     $fl = $Field.ToLower()
     switch ($fl) {
         'severity' { return $Event.Severity }
         'source'   { return $Event.Source }
         'message'  { return $Event.Message }
-        'timestamp' { return $Event.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') }
+        'timestamp' { if ($Event.Timestamp -ne [datetime]::MinValue) { return $Event.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { return '' } }
         'sourcefile' { return $Event.SourceFile }
         'sourceformat' { return $Event.SourceFormat }
         default {
+            if (-not $Event.Extra) { return $null }
             if ($Event.Extra.ContainsKey($Field)) { return $Event.Extra[$Field] }
             # Case-insensitive search in Extra
             foreach ($k in $Event.Extra.Keys) {
@@ -1117,7 +1121,7 @@ function Test-FieldCondition {
     if ($null -eq $Value) { return $false }
     $strVal = [string]$Value
     switch ($Op) {
-        'eq' { return $strVal -eq $Pattern -or $strVal -like $Pattern }
+        'eq' { return $strVal -ieq $Pattern -or $strVal -like $Pattern }
         'wildcard' { return $strVal -like $Pattern }
         'gt' { $n = $strVal -as [double]; $p = $Pattern -as [double]; if ($null -ne $n -and $null -ne $p) { return $n -gt $p }; return $false }
         'lt' { $n = $strVal -as [double]; $p = $Pattern -as [double]; if ($null -ne $n -and $null -ne $p) { return $n -lt $p }; return $false }
@@ -1127,6 +1131,7 @@ function Test-FieldCondition {
 
 function Invoke-PipelineOp {
     param([System.Collections.Generic.List[object]]$Events, [string]$Op)
+    if (-not $Events) { $Events = [System.Collections.Generic.List[object]]::new() }
     if ($Op -match '^count$') {
         $countObj = New-LogEvent -Message "Count: $($Events.Count)" -Severity 'Low'
         $countObj | Add-Member -NotePropertyName '_AggResult' -NotePropertyValue @(@{ Label = 'Count'; Value = $Events.Count })
@@ -1162,20 +1167,26 @@ function Invoke-PipelineOp {
     }
     if ($Op -match '^sort\s+(\w+)\s*(asc|desc)?$') {
         $field = $Matches[1]; $desc = ($Matches[2] -eq 'desc')
+        if ($Events.Count -eq 0) { return $Events }
         $sorted = $Events | Sort-Object { Get-EventFieldValue -Event $_ -Field $field } -Descending:$desc
-        $result = [System.Collections.Generic.List[object]]::new(); $result.AddRange(@($sorted))
+        $result = [System.Collections.Generic.List[object]]::new()
+        if ($null -ne $sorted) { $result.AddRange(@($sorted)) }
         return $result
     }
     if ($Op -match '^head\s+(\d+)$') {
         $n = [int]$Matches[1]
         $result = [System.Collections.Generic.List[object]]::new()
-        $result.AddRange($Events[0..([Math]::Min($n - 1, $Events.Count - 1))])
+        if ($Events.Count -gt 0) {
+            $result.AddRange($Events[0..([Math]::Min($n - 1, $Events.Count - 1))])
+        }
         return $result
     }
     if ($Op -match '^tail\s+(\d+)$') {
         $n = [int]$Matches[1]; $start = [Math]::Max(0, $Events.Count - $n)
         $result = [System.Collections.Generic.List[object]]::new()
-        $result.AddRange($Events[$start..($Events.Count - 1)])
+        if ($Events.Count -gt 0) {
+            $result.AddRange($Events[$start..($Events.Count - 1)])
+        }
         return $result
     }
     if ($Op -match '^table\s+(.+)$') {
@@ -1217,6 +1228,7 @@ function Invoke-PipelineOp {
 
 function Invoke-AnalyzeFailedLogins {
     param([System.Collections.Generic.List[object]]$Events)
+    if (-not $Events) { return @() }
     $aggregated = @{}
     foreach ($entry in $Events) {
         $user = $null; $sourceIp = $null; $isFailedLogin = $false
@@ -1264,6 +1276,7 @@ function Invoke-AnalyzeFailedLogins {
 
 function Invoke-AnalyzeVpnSessions {
     param([System.Collections.Generic.List[object]]$Events)
+    if (-not $Events) { return @{ Sessions = @{}; ImpossibleTravel = @() } }
     $sessions = @{}; $travelFlags = [System.Collections.Generic.List[object]]::new()
 
     foreach ($entry in $Events) {
@@ -1328,6 +1341,7 @@ function Invoke-AnalyzeVpnSessions {
 
 function Invoke-AnalyzeIpsecTunnel {
     param([System.Collections.Generic.List[object]]$Events)
+    if (-not $Events) { return @{ Tunnels = @{}; Failures = @(); Summary = @{ TotalTunnels = 0; UpCount = 0; DownCount = 0; FlapCount = 0 } } }
     $tunnels = @{}; $failures = [System.Collections.Generic.List[object]]::new()
 
     foreach ($entry in $Events) {
@@ -1419,6 +1433,7 @@ function Invoke-AnalyzeIpsecTunnel {
 
 function Get-LogStatistics {
     param([System.Collections.Generic.List[object]]$Events)
+    if (-not $Events) { $Events = [System.Collections.Generic.List[object]]::new() }
     $counts = @{ Critical = 0; High = 0; Medium = 0; Low = 0; Info = 0 }
     $sources = @{}; $eventIds = @{}; $perHour = @{}; $perFile = @{}
 
@@ -1519,10 +1534,10 @@ function Format-LogTable {
     # Check for aggregation results
     if ($displayEvents[0].PSObject.Properties['_AggCount']) {
         $fieldLabel = if ($displayEvents[0].PSObject.Properties['_AggField']) { $displayEvents[0]._AggField.ToUpper() } else { 'KEY' }
-        $maxKey = ($displayEvents | ForEach-Object { ([string]$_._AggKey).Length } | Measure-Object -Maximum).Maximum
-        $maxKey = [Math]::Max($maxKey, $fieldLabel.Length)
-        $maxCount = ($displayEvents | ForEach-Object { (Format-Number $_._AggCount).Length } | Measure-Object -Maximum).Maximum
-        $maxCount = [Math]::Max($maxCount, 5)
+        $maxKeyMeasure = ($displayEvents | ForEach-Object { ([string]$_._AggKey).Length } | Measure-Object -Maximum).Maximum
+        $maxKey = [Math]::Max($(if ($maxKeyMeasure) { $maxKeyMeasure } else { 3 }), $fieldLabel.Length)
+        $maxCountMeasure = ($displayEvents | ForEach-Object { (Format-Number $_._AggCount).Length } | Measure-Object -Maximum).Maximum
+        $maxCount = [Math]::Max($(if ($maxCountMeasure) { $maxCountMeasure } else { 5 }), 5)
 
         $hdr = '  ' + $fieldLabel.PadRight($maxKey + 2) + 'COUNT'.PadLeft($maxCount)
         Write-ColorText $hdr $script:C.BoldWhite
@@ -1690,10 +1705,13 @@ function Format-LogList {
         $fields['Timestamp'] = if ($e.Timestamp -ne [datetime]::MinValue) { $e.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
         $fields['Severity'] = $e.Severity
         $fields['Source'] = $e.Source
-        foreach ($k in $e.Extra.Keys) { $fields[$k] = $e.Extra[$k] }
-        $fields['Message'] = ($e.Message -replace "`n", "`n              ")
-        $fields['Raw'] = ($e.RawLine -replace "`n", "`n              ").Substring(0, [Math]::Min(500, $e.RawLine.Length))
-        $maxLabel = ($fields.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        if ($e.Extra) { foreach ($k in $e.Extra.Keys) { $fields[$k] = $e.Extra[$k] } }
+        $msgText = if ($e.Message) { $e.Message } else { '' }
+        $rawText = if ($e.RawLine) { $e.RawLine } else { '' }
+        $fields['Message'] = ($msgText -replace "`n", "`n              ")
+        $fields['Raw'] = ($rawText -replace "`n", "`n              ").Substring(0, [Math]::Min(500, $rawText.Length))
+        $maxLabelMeasure = ($fields.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        $maxLabel = if ($maxLabelMeasure) { $maxLabelMeasure } else { 10 }
         foreach ($kv in $fields.GetEnumerator()) {
             $label = $kv.Key.PadLeft($maxLabel)
             $val = [string]$kv.Value
@@ -1775,7 +1793,7 @@ function Write-LogStats {
     Write-Host ''
     Write-ColorText "$($hLine * 3) Severity $($hLine * 44)" $c.BoldWhite
     $maxCount = ($Stats.SeverityCounts.Values | Measure-Object -Maximum).Maximum
-    if ($maxCount -eq 0) { $maxCount = 1 }
+    if (-not $maxCount -or $maxCount -eq 0) { $maxCount = 1 }
     $barWidth = [Math]::Max(10, (Get-TerminalWidth) - 40)
     foreach ($sev in @('Critical','High','Medium','Low','Info')) {
         $count = $Stats.SeverityCounts[$sev]
@@ -2011,10 +2029,11 @@ function New-MorningBriefing {
     }
 
     # Security alerts
-    $secEvents = $Events | Where-Object { $_.Severity -in @('Critical','High') }
-    if (@($secEvents).Count -gt 0) {
-        $secData = @(@($secEvents) | Select-Object -First 20 | ForEach-Object {
-            @{ Time = $_.Timestamp.ToString('HH:mm:ss'); Severity = $_.Severity; Source = $_.Source; Message = $_.Message.Substring(0, [Math]::Min(80, $_.Message.Length)) }
+    $secEvents = @($Events | Where-Object { $_.Severity -in @('Critical','High') })
+    if ($secEvents.Count -gt 0) {
+        $secData = @($secEvents | Select-Object -First 20 | ForEach-Object {
+            $msgText = if ($_.Message) { $_.Message } else { '' }
+            @{ Time = $_.Timestamp.ToString('HH:mm:ss'); Severity = $_.Severity; Source = $_.Source; Message = $msgText.Substring(0, [Math]::Min(80, $msgText.Length)) }
         })
         $sections.Add((New-ReportSection 'Security Alerts' 'Table' $secData -Columns @('Time','Severity','Source','Message')))
     }
@@ -2033,18 +2052,19 @@ function New-AuditReport {
     })))
 
     # Privileged activity (Event 4672, 4648)
-    $privEvents = $Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4672,4648,4697,7045) }
-    if (@($privEvents).Count -gt 0) {
-        $privData = @(@($privEvents) | Select-Object -First 50 | ForEach-Object {
-            @{ Time = $_.Timestamp.ToString('yyyy-MM-dd HH:mm'); EventID = $_.Extra['EventID']; User = $_.Extra['TargetUserName']; Description = $_.Message.Substring(0, [Math]::Min(60, $_.Message.Length)) }
+    $privEvents = @($Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4672,4648,4697,7045) })
+    if ($privEvents.Count -gt 0) {
+        $privData = @($privEvents | Select-Object -First 50 | ForEach-Object {
+            $msgText = if ($_.Message) { $_.Message } else { '' }
+            @{ Time = $_.Timestamp.ToString('yyyy-MM-dd HH:mm'); EventID = $_.Extra['EventID']; User = $_.Extra['TargetUserName']; Description = $msgText.Substring(0, [Math]::Min(60, $msgText.Length)) }
         })
         $sections.Add((New-ReportSection 'Privileged Activity' 'Table' $privData -Columns @('Time','EventID','User','Description')))
     }
 
     # Account changes
-    $acctEvents = $Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4720,4722,4725,4726,4738,4740,4767) }
-    if (@($acctEvents).Count -gt 0) {
-        $acctData = @(@($acctEvents) | Select-Object -First 50 | ForEach-Object {
+    $acctEvents = @($Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4720,4722,4725,4726,4738,4740,4767) })
+    if ($acctEvents.Count -gt 0) {
+        $acctData = @($acctEvents | Select-Object -First 50 | ForEach-Object {
             $desc = if ($script:EventIdLookup.ContainsKey([int]$_.Extra['EventID'])) { $script:EventIdLookup[[int]$_.Extra['EventID']] } else { '' }
             @{ Time = $_.Timestamp.ToString('yyyy-MM-dd HH:mm'); EventID = $_.Extra['EventID']; Target = $_.Extra['TargetUserName']; Action = $desc }
         })
@@ -2107,12 +2127,13 @@ function New-ComplianceReport {
 function New-TimelineReport {
     param([System.Collections.Generic.List[object]]$Events)
     $sections = [System.Collections.Generic.List[object]]::new()
-    $sorted = $Events | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | Sort-Object Timestamp
-    $timelineData = @(@($sorted) | Select-Object -First 200 | ForEach-Object {
+    $sorted = @($Events | Where-Object { $null -ne $_ -and $_.Timestamp -ne [datetime]::MinValue } | Sort-Object Timestamp)
+    $timelineData = @($sorted | Select-Object -First 200 | ForEach-Object {
+        $msgText = if ($_.Message) { $_.Message } else { '' }
         @{
             Time = $_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss')
             Severity = $_.Severity; Source = $_.Source
-            Message = $_.Message.Substring(0, [Math]::Min(80, $_.Message.Length))
+            Message = $msgText.Substring(0, [Math]::Min(80, $msgText.Length))
             SourceFile = $_.SourceFile
         }
     })
@@ -2122,8 +2143,9 @@ function New-TimelineReport {
 
 function ConvertTo-HtmlReport {
     param([PSCustomObject]$ReportData, [System.Collections.Generic.List[object]]$Events)
+    if (-not $Events) { $Events = [System.Collections.Generic.List[object]]::new() }
     $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    $sourceFiles = ($Events | ForEach-Object { $_.SourceFile } | Sort-Object -Unique) -join ', '
+    $sourceFiles = if ($Events.Count -gt 0) { ($Events | ForEach-Object { $_.SourceFile } | Sort-Object -Unique) -join ', ' } else { '' }
     $totalEvents = Format-Number $Events.Count
     $minTs = [datetime]::MaxValue; $maxTs = [datetime]::MinValue
     foreach ($e in $Events) {
@@ -2147,7 +2169,7 @@ function ConvertTo-HtmlReport {
             }
             'BarChart' {
                 $maxVal = ($sec.Data | ForEach-Object { $_.Value } | Measure-Object -Maximum).Maximum
-                if ($maxVal -eq 0) { $maxVal = 1 }
+                if (-not $maxVal -or $maxVal -eq 0) { $maxVal = 1 }
                 $contentHtml += "<table><tr><th>LABEL</th><th>COUNT</th><th>BAR</th></tr>`n"
                 foreach ($item in $sec.Data) {
                     $barW = [Math]::Max(1, [int](($item.Value / $maxVal) * 200))
@@ -2236,7 +2258,7 @@ function Render-ReportToConsole {
             'KeyValue' { foreach ($kv in $sec.Data.GetEnumerator()) { Write-Host "  $($kv.Key.PadRight(16)) : $($kv.Value)" } }
             'BarChart' {
                 $maxVal = ($sec.Data | ForEach-Object { $_.Value } | Measure-Object -Maximum).Maximum
-                if ($maxVal -eq 0) { $maxVal = 1 }
+                if (-not $maxVal -or $maxVal -eq 0) { $maxVal = 1 }
                 $barWidth = [Math]::Max(10, (Get-TerminalWidth) - 40)
                 foreach ($item in $sec.Data) {
                     $bw = [Math]::Max(0, [int](($item.Value / $maxVal) * $barWidth))
@@ -2362,7 +2384,7 @@ function Start-InteractiveMode {
                 $fmt = Invoke-DetectLogFormat $loadPath
                 if (-not $fmt) { Write-Host "Unknown format: $loadPath"; continue }
                 $newEvents = Invoke-ParseLogFile -FilePath $loadPath -Format $fmt -SourceFile $loadPath
-                if ($newEvents.Count -gt 0) {
+                if ($null -ne $newEvents -and $newEvents.Count -gt 0) {
                     $currentEvents.AddRange($newEvents)
                     $currentEvents = [System.Collections.Generic.List[object]]($currentEvents | Sort-Object Timestamp)
                     $filteredEvents = $currentEvents
@@ -2562,24 +2584,28 @@ function Start-TailMode {
 
             # Quick parse for display
             $tempFile = [System.IO.Path]::GetTempFileName()
+            $events = $null
             try {
                 [System.IO.File]::WriteAllText($tempFile, $rawLine)
                 $events = Invoke-ParseLogFile -FilePath $tempFile -Format $Format
-            } finally { Remove-Item $tempFile -ErrorAction SilentlyContinue }
+            } catch {} finally { Remove-Item $tempFile -ErrorAction SilentlyContinue }
 
+            if (-not $events) { return }
             foreach ($e in $events) {
+                if (-not $e) { continue }
                 if ($FilterQuery) {
                     $filtered = Invoke-FilterEvents -Events ([System.Collections.Generic.List[object]]@($e)) -Query $FilterQuery
-                    if ($filtered.Count -eq 0) { return }
+                    if (-not $filtered -or $filtered.Count -eq 0) { return }
                 }
                 $eventCount++
                 $ts = if ($e.Timestamp -ne [datetime]::MinValue) { $e.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
                 $sev = Get-SeverityAbbrev $e.Severity
                 $sevC = if ($script:SevColor.ContainsKey($e.Severity)) { $script:SevColor[$e.Severity] } else { '' }
-                $msg = $e.Message -replace "`n", ' '
-                if ($msg.Length -gt 80) { $msg = $msg.Substring(0, 79) + [char]0x2026 }
-                if ($HighlightPattern) { $msg = Add-Highlight $msg $HighlightPattern }
-                Write-Host "$($ts.PadRight(21)) $sevC$($sev.PadRight(6))$($c.Reset) $($e.Source.PadRight(16)) $msg"
+                $msgText = if ($e.Message) { $e.Message -replace "`n", ' ' } else { '' }
+                if ($msgText.Length -gt 80) { $msgText = $msgText.Substring(0, 79) + [char]0x2026 }
+                if ($HighlightPattern) { $msgText = Add-Highlight $msgText $HighlightPattern }
+                $srcText = if ($e.Source) { $e.Source } else { '' }
+                Write-Host "$($ts.PadRight(21)) $sevC$($sev.PadRight(6))$($c.Reset) $($srcText.PadRight(16)) $msgText"
             }
             Write-Progress -Activity "Tailing $fileName" -Status "$eventCount events | Ctrl+C to stop"
         }
@@ -2641,7 +2667,7 @@ function Expand-LogArchive {
         if ($ext -eq '.zip') {
             # One level of nested zip
             $nestedResults = Expand-LogArchive $f.FullName
-            $results.AddRange($nestedResults)
+            if ($null -ne $nestedResults -and $nestedResults.Count -gt 0) { $results.AddRange($nestedResults) }
             continue
         }
         if ($ext -notin $tryExts -and $ext -ne '') { continue }
@@ -2716,7 +2742,7 @@ try {
         $script:TempDirs.Add($tempFile)
         [System.IO.File]::WriteAllLines($tempFile, $script:PipedLines.ToArray())
         $events = Invoke-ParseLogFile -FilePath $tempFile -Format $Format -SourceFile '(piped)'
-        $allEvents.AddRange($events)
+        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
         $loadedFiles.Add('(piped)')
         $loadedFormats.Add($Format)
     }
@@ -2734,20 +2760,21 @@ try {
         }
 
         foreach ($filePath in $resolvedPaths) {
-            if (-not (Test-Path $filePath)) { Write-Warning "File not found: $filePath"; continue }
+            if (-not (Test-Path -LiteralPath $filePath)) { Write-Warning "File not found: $filePath"; continue }
 
             if ($filePath -match '\.zip$') {
                 if (-not $script:QuietFlag) { Write-Host "Extracting $([System.IO.Path]::GetFileName($filePath))..." }
                 $archiveFiles = Expand-LogArchive $filePath
-                foreach ($af in $archiveFiles) {
-                    if (-not $script:QuietFlag) {
-                        $lineCount = ([System.IO.File]::ReadAllLines($af.Path)).Count
-                        Write-Progress -Activity 'Parsing' -Status "$($af.FileName) ($($af.Format))" -PercentComplete 0
+                if ($null -ne $archiveFiles) {
+                    foreach ($af in $archiveFiles) {
+                        if (-not $script:QuietFlag) {
+                            Write-Progress -Activity 'Parsing' -Status "$($af.FileName) ($($af.Format))" -PercentComplete 0
+                        }
+                        $events = Invoke-ParseLogFile -FilePath $af.Path -Format $af.Format -SourceFile $af.FileName
+                        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
+                        $loadedFiles.Add($af.FileName)
+                        if ($af.Format -notin $loadedFormats) { $loadedFormats.Add($af.Format) }
                     }
-                    $events = Invoke-ParseLogFile -FilePath $af.Path -Format $af.Format -SourceFile $af.FileName
-                    $allEvents.AddRange($events)
-                    $loadedFiles.Add($af.FileName)
-                    if ($af.Format -notin $loadedFormats) { $loadedFormats.Add($af.Format) }
                 }
             } else {
                 $fileFormat = if ($Format) { $Format } else { Invoke-DetectLogFormat $filePath }
@@ -2758,17 +2785,21 @@ try {
                 }
 
                 # Store raw lines for -Context support
-                if ($Context -gt 0) { $script:RawFileLines[$fileName] = [System.IO.File]::ReadAllLines($filePath) }
+                if ($Context -gt 0) {
+                    try { $script:RawFileLines[$fileName] = [System.IO.File]::ReadAllLines($filePath) } catch {}
+                }
 
                 $events = Invoke-ParseLogFile -FilePath $filePath -Format $fileFormat -SourceFile $filePath
-                $allEvents.AddRange($events)
+                if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
                 $loadedFiles.Add($fileName)
                 if ($fileFormat -notin $loadedFormats) { $loadedFormats.Add($fileFormat) }
             }
         }
     }
 
-    Write-Progress -Activity 'Parsing' -Completed
+    if (-not $script:QuietFlag -and -not $script:OutputRedirected) {
+        Write-Progress -Activity 'Parsing' -Completed
+    }
     $sw.Stop()
     $parseTime = $sw.Elapsed.TotalSeconds
 
@@ -2777,7 +2808,7 @@ try {
     # Sort by timestamp
     $sorted = $allEvents | Sort-Object { if ($_.Timestamp -ne [datetime]::MinValue) { $_.Timestamp } else { [datetime]::MaxValue } }
     $allEvents = [System.Collections.Generic.List[object]]::new()
-    $allEvents.AddRange(@($sorted))
+    if ($null -ne $sorted) { $allEvents.AddRange(@($sorted)) }
 
     # Config diff mode
     if ($DiffPath) {
@@ -2843,13 +2874,16 @@ try {
     if ($Regex) {
         $regexObj = [regex]::new($Regex, 'IgnoreCase, Compiled')
         $regexFiltered = [System.Collections.Generic.List[object]]::new()
-        foreach ($e in $filtered) { if ($regexObj.IsMatch($e.RawLine)) { $regexFiltered.Add($e) } }
+        foreach ($e in $filtered) {
+            $raw = if ($e.RawLine) { $e.RawLine } else { '' }
+            if ($regexObj.IsMatch($raw)) { $regexFiltered.Add($e) }
+        }
         $filtered = $regexFiltered
     }
 
     # Surround mode
     if ($Surround -gt 0 -and $filtered.Count -gt 0) {
-        $matchTimestamps = $filtered | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp }
+        $matchTimestamps = @($filtered | Where-Object { $null -ne $_ -and $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp })
         $surroundResult = [System.Collections.Generic.List[object]]::new()
         $surroundSpan = [timespan]::FromSeconds($Surround)
         foreach ($e in $allEvents) {
