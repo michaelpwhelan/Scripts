@@ -391,7 +391,7 @@ $script:Enrichment = @{
 # ============================================================================
 
 # Compiled regex patterns for performance
-$script:KvRegex = [regex]::new('(\w+)=("(?:[^"\\]|\\.)*"|[^\s]+)', 'Compiled')
+$script:KvRegex = [regex]::new('([\w-]+)=("(?:[^"\\]|\\.)*"|[^\s]+)', 'Compiled')
 $script:FortiClientPattern = [regex]::new('^\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\s+\[(\w+)\]\s+\[([\w.-]+)\]\s+(.*)', 'Compiled')
 
 function New-LogEvent {
@@ -455,6 +455,20 @@ function Get-SeverityFromText {
 }
 
 function Get-SafeEventId { param($Value); return ($Value -as [int]) }
+
+function Add-EventsToList {
+    param([System.Collections.Generic.List[object]]$Target, $Events)
+    if ($null -eq $Events) { return }
+    if ($Events -is [System.Collections.Generic.List[object]]) {
+        $Target.AddRange($Events)
+    } elseif ($Events -is [array]) {
+        $Target.AddRange($Events)
+    } elseif ($Events -is [System.Collections.IEnumerable] -and $Events -isnot [string] -and $Events -isnot [hashtable]) {
+        foreach ($e in $Events) { $Target.Add($e) }
+    } else {
+        $Target.Add($Events)
+    }
+}
 
 function Invoke-ParseFortiGateConf {
     param([string]$FilePath, [string]$SourceFile = '')
@@ -1035,7 +1049,7 @@ function Invoke-FilterEvents {
 function Parse-FilterConditions {
     param([string]$FilterText)
     $conditions = [System.Collections.Generic.List[object]]::new()
-    $tokens = [regex]::Matches($FilterText, '(NOT\s+)?(\w+):("(?:[^"\\]|\\.)*"|[^\s]+)|AND|OR')
+    $tokens = [regex]::Matches($FilterText, '(NOT\s+)?([\w-]+):("(?:[^"\\]|\\.)*"|[^\s]+)|AND|OR')
     $logicOp = 'AND'
     foreach ($tok in $tokens) {
         $val = $tok.Value
@@ -1043,7 +1057,7 @@ function Parse-FilterConditions {
         if ($val -eq 'OR') { $logicOp = 'OR'; continue }
         $negate = $false
         if ($val -match '^NOT\s+') { $negate = $true; $val = $val -replace '^NOT\s+', '' }
-        if ($val -match '^(\w+):(.+)$') {
+        if ($val -match '^([\w-]+):(.+)$') {
             $field = $Matches[1]; $pattern = $Matches[2].Trim('"')
             $op = 'eq'
             if ($pattern.StartsWith('>')) { $op = 'gt'; $pattern = $pattern.Substring(1) }
@@ -2369,8 +2383,8 @@ function Start-InteractiveMode {
                 $fmt = Invoke-DetectLogFormat $loadPath
                 if (-not $fmt) { Write-Host "Unknown format: $loadPath"; continue }
                 $newEvents = Invoke-ParseLogFile -FilePath $loadPath -Format $fmt -SourceFile $loadPath
-                if ($null -ne $newEvents -and $newEvents.Count -gt 0) {
-                    $currentEvents.AddRange($newEvents)
+                if ($null -ne $newEvents) {
+                    Add-EventsToList $currentEvents $newEvents
                     $currentEvents = [System.Collections.Generic.List[object]]($currentEvents | Sort-Object Timestamp)
                     $filteredEvents = $currentEvents
                     $activeFilter = ''
@@ -2639,7 +2653,7 @@ try {
         $script:TempDirs.Add($tempFile)
         [System.IO.File]::WriteAllLines($tempFile, $script:PipedLines.ToArray())
         $events = Invoke-ParseLogFile -FilePath $tempFile -Format $Format -SourceFile '(piped)'
-        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
+        if ($null -ne $events) { Add-EventsToList $allEvents $events }
         $loadedFiles.Add('(piped)')
         $loadedFormats.Add($Format)
     }
@@ -2668,7 +2682,7 @@ try {
                             Write-Progress -Activity 'Parsing' -Status "$($af.FileName) ($($af.Format))" -PercentComplete 0
                         }
                         $events = Invoke-ParseLogFile -FilePath $af.Path -Format $af.Format -SourceFile $af.FileName
-                        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
+                        if ($null -ne $events) { Add-EventsToList $allEvents $events }
                         $loadedFiles.Add($af.FileName)
                         if ($af.Format -notin $loadedFormats) { $loadedFormats.Add($af.Format) }
                     }
@@ -2687,7 +2701,7 @@ try {
                 }
 
                 $events = Invoke-ParseLogFile -FilePath $filePath -Format $fileFormat -SourceFile $filePath
-                if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
+                if ($null -ne $events) { Add-EventsToList $allEvents $events }
                 $loadedFiles.Add($fileName)
                 if ($fileFormat -notin $loadedFormats) { $loadedFormats.Add($fileFormat) }
             }
