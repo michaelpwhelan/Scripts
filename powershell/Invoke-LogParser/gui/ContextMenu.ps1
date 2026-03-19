@@ -86,6 +86,6 @@ function New-GridContextMenu {
         [System.Windows.Forms.Clipboard]::SetText($json)
         Update-StatusBar "Copied $($jsonEntries.Count) entries as JSON"
     })
-    $ctxMenu.Items.AddRange(@($ctxFilterBy, $ctxExclude, [System.Windows.Forms.ToolStripSeparator]::new(), $ctxCopyCell, $ctxCopyRow, $ctxCopyJson, [System.Windows.Forms.ToolStripSeparator]::new(), $ctxLookupId, $ctxCorrelate, $ctxRelated))
+    $ctxMenu.Items.AddRange([System.Windows.Forms.ToolStripItem[]]@($ctxFilterBy, $ctxExclude, [System.Windows.Forms.ToolStripSeparator]::new(), $ctxCopyCell, $ctxCopyRow, $ctxCopyJson, [System.Windows.Forms.ToolStripSeparator]::new(), $ctxLookupId, $ctxCorrelate, $ctxRelated))
     return $ctxMenu
 }

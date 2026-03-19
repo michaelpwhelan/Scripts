@@ -64,7 +64,7 @@ function New-MainForm {
     $sep2 = [System.Windows.Forms.ToolStripSeparator]::new()
     $exitItem = [System.Windows.Forms.ToolStripMenuItem]::new("E&xit")
     $exitItem.Add_Click({ $Script:UI.Form.Close() })
-    $fileMenu.DropDownItems.AddRange(@($openItem, $openMultiItem, $reloadItem, $Script:UI.RecentMenu, $sep1, $exportCsvItem, $exportHtmlItem, $sep2, $exitItem))
+    $fileMenu.DropDownItems.AddRange([System.Windows.Forms.ToolStripItem[]]@($openItem, $openMultiItem, $reloadItem, $Script:UI.RecentMenu, $sep1, $exportCsvItem, $exportHtmlItem, $sep2, $exitItem))
 
     # View menu
     $viewMenu = [System.Windows.Forms.ToolStripMenuItem]::new("&View")
@@ -82,7 +82,7 @@ function New-MainForm {
     $dashboardItem = [System.Windows.Forms.ToolStripMenuItem]::new("&Dashboard")
     $dashboardItem.Add_Click({ On-ShowDashboard })
 
-    $viewMenu.DropDownItems.AddRange(@($themeItem, $goToLineItem, $statsItem, $dashboardItem))
+    $viewMenu.DropDownItems.AddRange([System.Windows.Forms.ToolStripItem[]]@($themeItem, $goToLineItem, $statsItem, $dashboardItem))
 
     # Tools menu
     $toolsMenu = [System.Windows.Forms.ToolStripMenuItem]::new("&Tools")
@@ -129,7 +129,7 @@ function New-MainForm {
     $anomalyItem.Add_Click({ On-AnomalyDetection })
     $triageItem = [System.Windows.Forms.ToolStripMenuItem]::new("&Triage Check")
     $triageItem.Add_Click({ On-TriageCheck })
-    $analysisMenu.DropDownItems.AddRange(@($failedLoginItem, $vpnItem, [System.Windows.Forms.ToolStripSeparator]::new(), $bgpItem, $ipsecItem, $npsItem, [System.Windows.Forms.ToolStripSeparator]::new(), $certItem, $changeItem, $threatItem, $corrItem, $compItem, [System.Windows.Forms.ToolStripSeparator]::new(), $anomalyItem, $triageItem))
+    $analysisMenu.DropDownItems.AddRange([System.Windows.Forms.ToolStripItem[]]@($failedLoginItem, $vpnItem, [System.Windows.Forms.ToolStripSeparator]::new(), $bgpItem, $ipsecItem, $npsItem, [System.Windows.Forms.ToolStripSeparator]::new(), $certItem, $changeItem, $threatItem, $corrItem, $compItem, [System.Windows.Forms.ToolStripSeparator]::new(), $anomalyItem, $triageItem))
 
     # Reports submenu
     $reportsMenu = [System.Windows.Forms.ToolStripMenuItem]::new("&Reports")
@@ -145,12 +145,12 @@ function New-MainForm {
     $ffiecItem.Add_Click({ On-GenerateFfiecReport })
     $vulnItem = [System.Windows.Forms.ToolStripMenuItem]::new("&Vulnerability Report...")
     $vulnItem.Add_Click({ On-GenerateVulnerabilityReport })
-    $reportsMenu.DropDownItems.AddRange(@($auditRptItem, [System.Windows.Forms.ToolStripSeparator]::new(), $morningItem, $siteItem, $timelineItem, $ffiecItem, $vulnItem))
+    $reportsMenu.DropDownItems.AddRange([System.Windows.Forms.ToolStripItem[]]@($auditRptItem, [System.Windows.Forms.ToolStripSeparator]::new(), $morningItem, $siteItem, $timelineItem, $ffiecItem, $vulnItem))
 
     $diffItem = [System.Windows.Forms.ToolStripMenuItem]::new("&Diff / Compare...")
     $diffItem.Add_Click({ On-DiffCompare })
 
-    $toolsMenu.DropDownItems.AddRange(@($regexItem, [System.Windows.Forms.ToolStripSeparator]::new(), $iocItem, [System.Windows.Forms.ToolStripSeparator]::new(), $analysisMenu, $reportsMenu, [System.Windows.Forms.ToolStripSeparator]::new(), $diffItem))
+    $toolsMenu.DropDownItems.AddRange([System.Windows.Forms.ToolStripItem[]]@($regexItem, [System.Windows.Forms.ToolStripSeparator]::new(), $iocItem, [System.Windows.Forms.ToolStripSeparator]::new(), $analysisMenu, $reportsMenu, [System.Windows.Forms.ToolStripSeparator]::new(), $diffItem))
 
     # Investigations menu
     $investigationsMenu = [System.Windows.Forms.ToolStripMenuItem]::new("&Investigations")
@@ -175,7 +175,7 @@ function New-MainForm {
     })
     $helpMenu.DropDownItems.Add($aboutItem) | Out-Null
 
-    $menuStrip.Items.AddRange(@($fileMenu, $viewMenu, $toolsMenu, $investigationsMenu, $connectorsMenu, $helpMenu))
+    $menuStrip.Items.AddRange([System.Windows.Forms.ToolStripItem[]]@($fileMenu, $viewMenu, $toolsMenu, $investigationsMenu, $connectorsMenu, $helpMenu))
     $form.MainMenuStrip = $menuStrip
     $form.Controls.Add($menuStrip)
 
@@ -210,7 +210,7 @@ function New-MainForm {
     $btnParse.ToolTipText = "Parse the loaded file"
     $btnParse.Add_Click({ On-ParseClick })
 
-    $toolStrip.Items.AddRange(@($btnOpen, $btnReload, $Script:UI.BtnTail, $sepTs, $lblFormat, $Script:UI.CmbFormat, $sepTs2, $lblFile, $Script:UI.LblFilePath, $btnParse))
+    $toolStrip.Items.AddRange([System.Windows.Forms.ToolStripItem[]]@($btnOpen, $btnReload, $Script:UI.BtnTail, $sepTs, $lblFormat, $Script:UI.CmbFormat, $sepTs2, $lblFile, $Script:UI.LblFilePath, $btnParse))
     $form.Controls.Add($toolStrip)
 
     # --- Status Strip ---
@@ -224,7 +224,7 @@ function New-MainForm {
     $Script:UI.StatusFileLabel.Spring = $true
     $Script:UI.ProgressBar = [System.Windows.Forms.ToolStripProgressBar]::new()
     $Script:UI.ProgressBar.Minimum = 0; $Script:UI.ProgressBar.Maximum = 100; $Script:UI.ProgressBar.Value = 0
-    $statusStrip.Items.AddRange(@($Script:UI.StatusLabel, $Script:UI.StatusEntryCount, $Script:UI.StatusBookmarkLabel, $Script:UI.StatusFileLabel, $Script:UI.ProgressBar))
+    $statusStrip.Items.AddRange([System.Windows.Forms.ToolStripItem[]]@($Script:UI.StatusLabel, $Script:UI.StatusEntryCount, $Script:UI.StatusBookmarkLabel, $Script:UI.StatusFileLabel, $Script:UI.ProgressBar))
     $form.Controls.Add($statusStrip)
 
     # --- Query Bar (v5.0) ---
@@ -269,7 +269,7 @@ function New-MainForm {
             Update-StatusBar "Query error: $_" -IsError
         }
     })
-    $queryPanel.Controls.AddRange(@($lblQuery, $Script:UI.TxtQuery, $btnRunQuery))
+    $queryPanel.Controls.AddRange([System.Windows.Forms.Control[]]@($lblQuery, $Script:UI.TxtQuery, $btnRunQuery))
     $form.Controls.Add($queryPanel)
 
     # --- Outer Split (Filter panel | Main area) ---
@@ -541,7 +541,7 @@ function New-MainForm {
     $colMsg = [System.Windows.Forms.DataGridViewTextBoxColumn]::new()
     $colMsg.Name = "Message"; $colMsg.HeaderText = "Message"; $colMsg.AutoSizeMode = "Fill"
 
-    $grid.Columns.AddRange(@($colStar, $colIdx, $colTs, $colLevel, $colSource, $colMsg))
+    $grid.Columns.AddRange([System.Windows.Forms.DataGridViewColumn[]]@($colStar, $colIdx, $colTs, $colLevel, $colSource, $colMsg))
 
     # Column width persistence: restore saved widths
     if ($Script:State.ColumnWidths.Count -gt 0) {
