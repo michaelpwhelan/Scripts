@@ -1,0 +1,310 @@
+[
+    {
+        "id": "admin-brute-force",
+        "name": "Multiple Failed Admin Logins",
+        "description": "More than 5 failed authentication attempts for admin-level accounts within 15 minutes",
+        "enabled": true,
+        "trigger": {
+            "type": "threshold",
+            "filter": {
+                "levels": ["ERROR", "WARNING"],
+                "extraMatch": [
+                    { "field": "EventID", "values": [4625, 4771] },
+                    { "field": "action", "pattern": "deny|fail" }
+                ]
+            },
+            "threshold": 5,
+            "windowMinutes": 15,
+            "groupBy": "user"
+        },
+        "gather": {
+            "expandWindowMinutes": 30,
+            "correlationKeys": ["user", "srcip"],
+            "additionalSources": ["nps-radius", "fortigate-kv"]
+        },
+        "severity": "HIGH",
+        "severityEscalation": {
+            "threshold": 20,
+            "escalateTo": "CRITICAL"
+        },
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Verify if the user account is a privileged/admin account",
+            "Check source IP against known assets",
+            "Review if account was subsequently locked out (Event 4740)",
+            "Check for successful login after failures (potential compromise)",
+            "Contact user to verify login attempts"
+        ]
+    },
+    {
+        "id": "lateral-movement",
+        "name": "Potential Lateral Movement",
+        "description": "Authentication from unusual source followed by remote service access to different target",
+        "enabled": true,
+        "trigger": {
+            "type": "sequence",
+            "steps": [
+                { "filter": { "extraMatch": [{ "field": "EventID", "values": [4624] }] }, "label": "logon" },
+                { "filter": { "extraMatch": [{ "field": "EventID", "values": [5140, 5145, 4648] }] }, "label": "remote_access" }
+            ],
+            "windowMinutes": 15,
+            "correlationKey": "user"
+        },
+        "gather": {
+            "expandWindowMinutes": 60,
+            "correlationKeys": ["user", "srcip"],
+            "additionalSources": ["defender-alerts"]
+        },
+        "severity": "CRITICAL",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Identify the source workstation and verify with user",
+            "Check if target systems are expected for this user's role",
+            "Review Defender for Endpoint alerts on both source and target",
+            "Check for data exfiltration indicators",
+            "Consider isolating the source device pending investigation"
+        ]
+    },
+    {
+        "id": "tunnel-instability",
+        "name": "Tunnel Instability",
+        "description": "More than 10 tunnel flaps in 1 hour on any IPsec tunnel",
+        "enabled": true,
+        "trigger": {
+            "type": "threshold",
+            "filter": {
+                "extraMatch": [
+                    { "field": "action", "pattern": "tunnel-down|tunnel-up|phase1-error" }
+                ]
+            },
+            "threshold": 10,
+            "windowMinutes": 60,
+            "groupBy": "TunnelName"
+        },
+        "gather": {
+            "expandWindowMinutes": 120,
+            "correlationKeys": ["TunnelName", "RemoteGw", "devname"]
+        },
+        "severity": "HIGH",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Check ISP status for affected WAN links",
+            "Review FortiGate system resources (CPU, memory)",
+            "Check for MTU/fragmentation issues",
+            "Verify DPD settings and interval",
+            "Check if flaps correlate with time-of-day pattern (ISP maintenance)"
+        ]
+    },
+    {
+        "id": "backup-failure",
+        "name": "Backup Job Failure",
+        "description": "Veeam backup job failure with associated infrastructure events",
+        "enabled": true,
+        "trigger": {
+            "type": "pattern",
+            "filter": {
+                "levels": ["ERROR", "CRITICAL"],
+                "sourceFormatMatch": "veeam-job|veeam-session",
+                "messagePattern": "fail|error|cannot"
+            }
+        },
+        "gather": {
+            "expandWindowMinutes": 60,
+            "correlationKeys": ["VmName", "Host"],
+            "additionalSources": ["hyperv-event", "windows-evtx"]
+        },
+        "severity": "HIGH",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Check Veeam console for detailed job status",
+            "Verify VM/host accessibility",
+            "Check storage space on backup repository",
+            "Review VSS writer status on source VM",
+            "Check network connectivity to backup target"
+        ]
+    },
+    {
+        "id": "cert-expiry-critical",
+        "name": "Critical Certificate Expiring",
+        "description": "Certificate on a critical asset expiring within 30 days",
+        "enabled": true,
+        "trigger": {
+            "type": "pattern",
+            "filter": {
+                "extraMatch": [
+                    { "field": "DaysToExpiry", "comparison": "lte", "value": 30 }
+                ]
+            }
+        },
+        "gather": {
+            "expandWindowMinutes": 0,
+            "correlationKeys": ["Thumbprint", "Subject"]
+        },
+        "severity": "MEDIUM",
+        "severityEscalation": {
+            "assetCriticalityMin": "High",
+            "escalateTo": "HIGH"
+        },
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Identify the certificate and its purpose",
+            "Plan certificate renewal",
+            "Verify auto-enrollment is configured if applicable",
+            "Test renewal in non-production first",
+            "Schedule maintenance window for certificate replacement"
+        ]
+    },
+    {
+        "id": "bgp-route-anomaly",
+        "name": "BGP Route Anomaly",
+        "description": "Unexpected BGP neighbor state change or route withdrawal",
+        "enabled": true,
+        "trigger": {
+            "type": "pattern",
+            "filter": {
+                "levels": ["ERROR", "WARNING", "CRITICAL"],
+                "sourceFormatMatch": "fortigate-bgp",
+                "messagePattern": "neighbor.*down|Established.*Idle|route.*withdraw"
+            }
+        },
+        "gather": {
+            "expandWindowMinutes": 30,
+            "correlationKeys": ["NeighborIp", "devname"],
+            "additionalSources": ["fortigate-ha", "fortigate-ipsec"]
+        },
+        "severity": "HIGH",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Verify tunnel status to the affected neighbor",
+            "Check if HA failover occurred simultaneously",
+            "Verify BGP configuration on both peers",
+            "Check for route flapping patterns",
+            "Review ISP/WAN link status"
+        ]
+    },
+    {
+        "id": "nps-degradation",
+        "name": "NPS Service Degradation",
+        "description": "Elevated NPS authentication failures indicating potential service issues",
+        "enabled": true,
+        "trigger": {
+            "type": "threshold",
+            "filter": {
+                "extraMatch": [
+                    { "field": "PacketTypeName", "values": ["Access-Reject"] }
+                ]
+            },
+            "threshold": 50,
+            "windowMinutes": 30
+        },
+        "gather": {
+            "expandWindowMinutes": 60,
+            "correlationKeys": ["NAS-IP-Address", "Reason-Code"]
+        },
+        "severity": "HIGH",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Check NPS server health and service status",
+            "Review top rejection reason codes",
+            "Verify AD connectivity from NPS server",
+            "Check certificate validity on NPS server",
+            "Verify RADIUS shared secrets with NAS devices"
+        ]
+    },
+    {
+        "id": "defender-critical",
+        "name": "Defender Critical Alert",
+        "description": "Critical severity Defender for Endpoint alert",
+        "enabled": true,
+        "trigger": {
+            "type": "pattern",
+            "filter": {
+                "levels": ["CRITICAL"],
+                "sourceFormatMatch": "defender-alerts"
+            }
+        },
+        "gather": {
+            "expandWindowMinutes": 120,
+            "correlationKeys": ["DeviceName", "UserPrincipalName", "srcip"],
+            "additionalSources": ["windows-evtx", "fortigate-kv"]
+        },
+        "severity": "CRITICAL",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Review alert details in Microsoft 365 Security Center",
+            "Check device isolation status",
+            "Review user's recent activity",
+            "Check for lateral movement indicators",
+            "Initiate incident response procedure if confirmed"
+        ]
+    },
+    {
+        "id": "config-change-outside-window",
+        "name": "Configuration Change Outside Maintenance Window",
+        "description": "FortiManager policy push outside defined maintenance windows",
+        "enabled": true,
+        "trigger": {
+            "type": "pattern",
+            "filter": {
+                "sourceFormatMatch": "fortimanager-audit",
+                "extraMatch": [
+                    { "field": "action", "pattern": "install_policy|config_change" }
+                ]
+            },
+            "timeExclusion": {
+                "day": "Sunday",
+                "start": "01:00",
+                "end": "05:00"
+            }
+        },
+        "gather": {
+            "expandWindowMinutes": 30,
+            "correlationKeys": ["user", "devname"]
+        },
+        "severity": "MEDIUM",
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Verify if change was authorized",
+            "Check change management records",
+            "Review what was changed",
+            "Verify change didn't cause service disruption",
+            "Document as exception if authorized emergency change"
+        ]
+    },
+    {
+        "id": "multi-av-detection",
+        "name": "Multiple AV Detections",
+        "description": "Multiple antivirus or malware detections across different endpoints within 1 hour",
+        "enabled": true,
+        "trigger": {
+            "type": "threshold",
+            "filter": {
+                "extraMatch": [
+                    { "field": "EventID", "values": [1116, 1117, 1006, 1007] },
+                    { "field": "action", "pattern": "blocked|quarantine|detected" }
+                ]
+            },
+            "threshold": 3,
+            "windowMinutes": 60,
+            "groupBy": "device"
+        },
+        "gather": {
+            "expandWindowMinutes": 120,
+            "correlationKeys": ["DeviceName", "srcip", "user"],
+            "additionalSources": ["defender-alerts", "fortigate-kv"]
+        },
+        "severity": "HIGH",
+        "severityEscalation": {
+            "threshold": 10,
+            "escalateTo": "CRITICAL"
+        },
+        "actions": ["report"],
+        "recommendedSteps": [
+            "Identify the malware/threat name across detections",
+            "Determine if same threat on multiple devices (outbreak) or different threats",
+            "Check email gateway logs for potential phishing campaign",
+            "Review web filter logs for malicious downloads",
+            "Consider network isolation if outbreak confirmed"
+        ]
+    }
+]

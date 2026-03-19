@@ -1,0 +1,294 @@
+[
+  {
+    "id": "Directory_ABCDE_12345",
+    "category": "UserManagement",
+    "correlationId": "corr-001-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Add user",
+    "activityDateTime": "2026-03-18T08:00:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Add",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-admin-001",
+        "displayName": "IT Admin",
+        "userPrincipalName": "admin@contoso.com",
+        "ipAddress": "10.0.1.5"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "usr-new-001",
+        "displayName": "Jane Doe",
+        "type": "User",
+        "userPrincipalName": "jdoe@contoso.com",
+        "modifiedProperties": [
+          { "displayName": "AccountEnabled", "oldValue": null, "newValue": "True" },
+          { "displayName": "DisplayName", "oldValue": null, "newValue": "Jane Doe" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12346",
+    "category": "UserManagement",
+    "correlationId": "corr-002-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Reset user password",
+    "activityDateTime": "2026-03-18T09:00:00Z",
+    "loggedByService": "Self-service Password Management",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-001",
+        "displayName": "John Smith",
+        "userPrincipalName": "jsmith@contoso.com",
+        "ipAddress": "10.0.1.50"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "usr-001",
+        "displayName": "John Smith",
+        "type": "User",
+        "userPrincipalName": "jsmith@contoso.com",
+        "modifiedProperties": [
+          { "displayName": "PasswordResetMethod", "oldValue": null, "newValue": "Email" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12347",
+    "category": "GroupManagement",
+    "correlationId": "corr-003-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Add member to group",
+    "activityDateTime": "2026-03-18T10:00:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-admin-001",
+        "displayName": "IT Admin",
+        "userPrincipalName": "admin@contoso.com",
+        "ipAddress": "10.0.1.5"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "grp-001",
+        "displayName": "VPN-Users",
+        "type": "Group",
+        "modifiedProperties": [
+          { "displayName": "Member", "oldValue": null, "newValue": "jdoe@contoso.com" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12348",
+    "category": "GroupManagement",
+    "correlationId": "corr-004-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Remove member from group",
+    "activityDateTime": "2026-03-18T10:30:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-admin-001",
+        "displayName": "IT Admin",
+        "userPrincipalName": "admin@contoso.com",
+        "ipAddress": "10.0.1.5"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "grp-002",
+        "displayName": "Domain Admins",
+        "type": "Group",
+        "modifiedProperties": [
+          { "displayName": "Member", "oldValue": "temp-contractor@contoso.com", "newValue": null }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12349",
+    "category": "Policy",
+    "correlationId": "corr-005-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Update conditional access policy",
+    "activityDateTime": "2026-03-18T11:00:00Z",
+    "loggedByService": "Conditional Access",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-secadmin-001",
+        "displayName": "Security Admin",
+        "userPrincipalName": "secadmin@contoso.com",
+        "ipAddress": "10.0.1.10"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "pol-001",
+        "displayName": "Require MFA for Admins",
+        "type": "Policy",
+        "modifiedProperties": [
+          { "displayName": "State", "oldValue": "enabledForReportingButNotEnforced", "newValue": "enabled" },
+          { "displayName": "IncludeRoles", "oldValue": "[\"Global Administrator\"]", "newValue": "[\"Global Administrator\",\"Exchange Administrator\",\"SharePoint Administrator\"]" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12350",
+    "category": "RoleManagement",
+    "correlationId": "corr-006-2026-0318",
+    "result": "success",
+    "resultReason": "PIM activation approved",
+    "activityDisplayName": "Add member to role (PIM activated)",
+    "activityDateTime": "2026-03-18T12:00:00Z",
+    "loggedByService": "PIM",
+    "operationType": "Add",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-002",
+        "displayName": "Maria Jones",
+        "userPrincipalName": "mjones@contoso.com",
+        "ipAddress": "10.0.1.55"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "role-001",
+        "displayName": "Global Administrator",
+        "type": "Role",
+        "modifiedProperties": [
+          { "displayName": "RoleActivationDuration", "oldValue": null, "newValue": "PT4H" },
+          { "displayName": "Justification", "oldValue": null, "newValue": "Emergency server maintenance required" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12351",
+    "category": "ApplicationManagement",
+    "correlationId": "corr-007-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Add service principal credentials",
+    "activityDateTime": "2026-03-18T13:00:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-dev-001",
+        "displayName": "Dev Lead",
+        "userPrincipalName": "devlead@contoso.com",
+        "ipAddress": "10.0.1.60"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "app-001",
+        "displayName": "Internal API App",
+        "type": "ServicePrincipal",
+        "modifiedProperties": [
+          { "displayName": "KeyCredential", "oldValue": null, "newValue": "[Redacted]" }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12352",
+    "category": "UserManagement",
+    "correlationId": "corr-008-2026-0318",
+    "result": "failure",
+    "resultReason": "Permission denied - Insufficient privileges",
+    "activityDisplayName": "Delete user",
+    "activityDateTime": "2026-03-18T14:00:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Delete",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-helpdesk-001",
+        "displayName": "Helpdesk User",
+        "userPrincipalName": "helpdesk@contoso.com",
+        "ipAddress": "10.0.1.70"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "usr-admin-001",
+        "displayName": "IT Admin",
+        "type": "User",
+        "userPrincipalName": "admin@contoso.com"
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12353",
+    "category": "Policy",
+    "correlationId": "corr-009-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Delete conditional access policy",
+    "activityDateTime": "2026-03-18T15:00:00Z",
+    "loggedByService": "Conditional Access",
+    "operationType": "Delete",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-secadmin-001",
+        "displayName": "Security Admin",
+        "userPrincipalName": "secadmin@contoso.com",
+        "ipAddress": "10.0.1.10"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "pol-002",
+        "displayName": "Block Legacy Authentication",
+        "type": "Policy"
+      }
+    ]
+  },
+  {
+    "id": "Directory_ABCDE_12354",
+    "category": "UserManagement",
+    "correlationId": "corr-010-2026-0318",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Update user",
+    "activityDateTime": "2026-03-18T16:00:00Z",
+    "loggedByService": "Core Directory",
+    "operationType": "Update",
+    "initiatedBy": {
+      "user": {
+        "id": "usr-admin-001",
+        "displayName": "IT Admin",
+        "userPrincipalName": "admin@contoso.com",
+        "ipAddress": "10.0.1.5"
+      }
+    },
+    "targetResources": [
+      {
+        "id": "usr-001",
+        "displayName": "John Smith",
+        "type": "User",
+        "userPrincipalName": "jsmith@contoso.com",
+        "modifiedProperties": [
+          { "displayName": "StrongAuthenticationMethod", "oldValue": "PhoneAppNotification", "newValue": "FIDO2SecurityKey" },
+          { "displayName": "Department", "oldValue": "IT", "newValue": "Engineering" }
+        ]
+      }
+    ]
+  }
+]

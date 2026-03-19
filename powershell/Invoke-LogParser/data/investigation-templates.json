@@ -1,0 +1,195 @@
+[
+    {
+        "id": "failed-logins-24h",
+        "name": "Failed Logins (24h)",
+        "category": "Security",
+        "description": "Failed authentication attempts across all log sources in the last 24 hours",
+        "regex": "4625|4771|6273|deny.*auth|Access-Reject",
+        "levels": ["ERROR", "WARNING"],
+        "dateRelative": "-24h",
+        "formats": ["windows-evtx", "nps-radius", "fortigate-kv"]
+    },
+    {
+        "id": "vpn-session-lifecycle",
+        "name": "VPN Session Lifecycle",
+        "category": "VPN",
+        "description": "VPN tunnel establishment and teardown events",
+        "regex": "tunnel-up|tunnel-down|sslvpn|ssl-new-con|ssl-exit",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["fortigate-kv"]
+    },
+    {
+        "id": "ad-account-changes",
+        "name": "AD Account Changes",
+        "category": "Compliance",
+        "description": "Active Directory account creation, modification, and deletion",
+        "regex": "4720|4722|4725|4726|4728|4732|4740|4738",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["windows-evtx"]
+    },
+    {
+        "id": "service-installs",
+        "name": "Service Installs",
+        "category": "Security",
+        "description": "New service installations and service changes (potential persistence)",
+        "regex": "7045|7040|4697",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["windows-evtx"]
+    },
+    {
+        "id": "backup-failures",
+        "name": "Backup Failures",
+        "category": "Operations",
+        "description": "Veeam backup job errors and warnings",
+        "levels": ["ERROR", "WARNING"],
+        "formats": ["veeam-job"]
+    },
+    {
+        "id": "firewall-denies",
+        "name": "Firewall Denies",
+        "category": "Network",
+        "description": "Blocked/denied traffic events from FortiGate",
+        "regex": "deny|block|dropped",
+        "levels": ["ERROR"],
+        "formats": ["fortigate-kv"]
+    },
+    {
+        "id": "privilege-escalation",
+        "name": "Privilege Escalation",
+        "category": "Security",
+        "description": "Special privilege assignment, explicit credential usage, and group changes",
+        "regex": "4672|4648|4728|4732|4756",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["windows-evtx"]
+    },
+    {
+        "id": "ransomware-indicators",
+        "name": "Ransomware Indicators",
+        "category": "Incident",
+        "description": "Defender alerts, suspicious patterns, and encryption-related events",
+        "regex": "1116|1117|5001|encrypt|ransom|shadow.*copy|vssadmin",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["windows-evtx", "fortigate-kv"]
+    },
+    {
+        "id": "log-tampering",
+        "name": "Log Tampering",
+        "category": "Security",
+        "description": "Audit log cleared, audit policy changes, and defense evasion indicators",
+        "regex": "1102|4719|4718",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["windows-evtx"]
+    },
+    {
+        "id": "dhcp-issues",
+        "name": "DHCP Issues",
+        "category": "Network",
+        "description": "DHCP lease denials, scope exhaustion, and duplicate addresses",
+        "levels": ["ERROR", "WARNING"],
+        "formats": ["dhcp-server"]
+    },
+    {
+        "id": "dns-failures",
+        "name": "DNS Failures",
+        "category": "Network",
+        "description": "DNS resolution failures and errors",
+        "regex": "SERVFAIL|NXDOMAIN|REFUSED|FORMERR",
+        "levels": ["ERROR", "WARNING"],
+        "formats": ["dns-debug"]
+    },
+    {
+        "id": "risky-signins",
+        "name": "Risky Sign-Ins",
+        "category": "Security",
+        "description": "Entra ID sign-ins flagged as risky or with conditional access failures",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["entra-signin"]
+    },
+    {
+        "id": "after-hours-activity",
+        "name": "After-Hours Activity",
+        "category": "Compliance",
+        "description": "Events occurring outside business hours (6 PM - 7 AM)",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["windows-evtx", "fortigate-kv", "entra-signin"]
+    },
+    {
+        "id": "firewall-policy-audit",
+        "name": "Firewall Policy Audit",
+        "category": "Compliance",
+        "description": "FortiGate configuration flags: permissive rules, missing UTM, disabled policies",
+        "regex": "PERMISSIVE|NO-UTM|NO-LOGGING|NO-IPS|INSECURE-MGMT|DISABLED",
+        "levels": ["ERROR", "WARNING"],
+        "formats": ["fortigate-conf"]
+    },
+    {
+        "id": "ipsec-tunnel-failures",
+        "name": "IPsec Tunnel Failures",
+        "category": "Network",
+        "description": "IPsec VPN tunnel negotiation failures and DPD timeouts",
+        "regex": "phase[12].*fail|negotiate.*error|DPD.*timeout|ipsec.*down|tunnel-down",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["fortigate-ipsec", "fortigate-kv"]
+    },
+    {
+        "id": "bgp-flaps",
+        "name": "BGP Route Flaps",
+        "category": "Network",
+        "description": "BGP neighbor state changes and route flapping",
+        "regex": "BGP.*state|neighbor.*down|Established.*Idle|route.*withdraw",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["fortigate-bgp", "fortigate-kv"]
+    },
+    {
+        "id": "ha-failover",
+        "name": "HA Failover Events",
+        "category": "Operations",
+        "description": "High-availability cluster failover and member status changes",
+        "regex": "failover|split-brain|ha-member|heartbeat.*lost|HA.*state",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["fortigate-ha", "fortigate-kv"]
+    },
+    {
+        "id": "defender-threats",
+        "name": "Defender Threat Detections",
+        "category": "Security",
+        "description": "Microsoft Defender endpoint protection alerts and threat detections",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["defender-alerts", "windows-evtx"]
+    },
+    {
+        "id": "cert-expiry-30d",
+        "name": "Certificates Expiring (30 Days)",
+        "category": "Operations",
+        "description": "SSL/TLS certificates expiring within the next 30 days",
+        "regex": "expir|certificate|thumbprint",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["certificate-event"]
+    },
+    {
+        "id": "compliance-violations",
+        "name": "Compliance Violations",
+        "category": "Compliance",
+        "description": "Events indicating potential compliance control failures",
+        "regex": "non-compliant|violation|policy.*fail|unauthorized|denied",
+        "levels": ["CRITICAL", "ERROR", "WARNING"],
+        "formats": ["intune-compliance", "windows-evtx", "fortigate-kv"]
+    },
+    {
+        "id": "vulnerability-critical",
+        "name": "Critical Vulnerabilities",
+        "category": "Security",
+        "description": "Critical and high severity vulnerabilities with available exploits",
+        "levels": ["CRITICAL", "ERROR"],
+        "formats": ["defender-vulnerability"]
+    },
+    {
+        "id": "switch-port-events",
+        "name": "Switch Port Events",
+        "category": "Network",
+        "description": "FortiSwitch port status changes, STP events, and 802.1X authentication",
+        "regex": "port.*up|port.*down|stp|802\\.1X|mac-violation|link.*change",
+        "levels": ["CRITICAL", "ERROR", "WARNING", "INFO"],
+        "formats": ["fortiswitch-event"]
+    }
+]
