@@ -393,6 +393,7 @@ $script:Enrichment = @{
 # Compiled regex patterns for performance
 $script:KvRegex = [regex]::new('([\w-]+)=("(?:[^"\\]|\\.)*"|[^\s]+)', 'Compiled')
 $script:FortiClientPattern = [regex]::new('^\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\s+\[(\w+)\]\s+\[([\w.-]+)\]\s+(.*)', 'Compiled')
+$script:FortiClientTabPattern = [regex]::new('^(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\t(\w+)\t([\w.-]+)\t(.*)', 'Compiled, IgnoreCase')
 
 function New-LogEvent {
     param(
@@ -676,6 +677,65 @@ function Invoke-ParseFortiClientLocal {
         while (-not $reader.EndOfStream) {
             $rawLine = $reader.ReadLine(); $lineNum++
             if ([string]::IsNullOrWhiteSpace($rawLine)) { continue }
+
+            # Try tab-delimited format first: TIMESTAMP<TAB>LEVEL<TAB>CATEGORY<TAB>MESSAGE
+            $m = $script:FortiClientTabPattern.Match($rawLine)
+            if ($m.Success) {
+                $ts = [datetime]::MinValue
+                [datetime]::TryParse($m.Groups[1].Value, [ref]$ts) | Out-Null
+                $rawLevel = $m.Groups[2].Value.ToLower()
+                $category = $m.Groups[3].Value
+                $msgField = $m.Groups[4].Value
+
+                $extra = @{
+                    Category = $category
+                    Module = $category
+                    ModuleName = if ($script:Enrichment.FortiClient.ContainsKey($category.ToLower())) {
+                        $script:Enrichment.FortiClient[$category.ToLower()]
+                    } else { $category }
+                }
+
+                # Check if MESSAGE field contains structured key=value event data
+                if ($msgField -match '^date=\d{4}-\d{2}-\d{2}\s+time=') {
+                    $extra['LogType'] = 'Event'
+                    $kvMatches = $script:KvRegex.Matches($msgField)
+                    foreach ($kvm in $kvMatches) { $extra[$kvm.Groups[1].Value] = $kvm.Groups[2].Value.Trim('"') }
+
+                    # Use KV level if present, fall back to tab-delimited level
+                    $kvLevel = if ($extra['level']) { $extra['level'] } else { $rawLevel }
+                    $severity = switch ($kvLevel.ToLower()) {
+                        'emergency'   { 'Critical' } 'alert' { 'Critical' } 'critical' { 'Critical' }
+                        'error'       { 'High' } 'warning' { 'Medium' }
+                        'notice'      { 'Low' } 'information' { 'Low' } 'info' { 'Low' }
+                        'debug'       { 'Info' }
+                        default       { Get-SeverityFromText $msgField }
+                    }
+                    $source = if ($extra['hostname']) { $extra['hostname'] }
+                        elseif ($extra['devid']) { $extra['devid'] }
+                        else { $extra['ModuleName'] }
+                    $msg = if ($extra['msg']) { $extra['msg'] }
+                        elseif ($extra['eventtype']) { "$($extra['type'])/$($extra['subtype']): $($extra['eventtype'])" }
+                        else { $msgField.Substring(0, [Math]::Min(200, $msgField.Length)) }
+                } else {
+                    # Format A: debug/internal line
+                    $extra['LogType'] = 'Debug'
+                    $severity = switch ($rawLevel) {
+                        'critical' { 'Critical' } 'error' { 'High' } 'warning' { 'Medium' }
+                        'info' { 'Low' } 'debug' { 'Info' }
+                        default { Get-SeverityFromText $rawLevel }
+                    }
+                    $source = $extra['ModuleName']
+                    $msg = $msgField
+                }
+
+                $prevEntry = New-LogEvent -Timestamp $ts -Severity $severity -Source $source `
+                    -Message $msg -RawLine $rawLine -SourceFile $SourceFile `
+                    -SourceFormat 'FortiClientLocal' -LineNumber $lineNum -Extra $extra
+                $entries.Add($prevEntry)
+                continue
+            }
+
+            # Try legacy bracket format: [YYYY-MM-DD HH:MM:SS] [level] [module] message
             $m = $script:FortiClientPattern.Match($rawLine)
             if ($m.Success) {
                 $ts = [datetime]::MinValue
@@ -689,12 +749,16 @@ function Invoke-ParseFortiClientLocal {
                 $moduleName = if ($script:Enrichment.FortiClient.ContainsKey($module.ToLower())) {
                     $script:Enrichment.FortiClient[$module.ToLower()]
                 } else { $module }
-                $extra = @{ Module = $module; ModuleName = $moduleName }
+                $extra = @{ Module = $module; ModuleName = $moduleName; LogType = 'Event' }
                 $prevEntry = New-LogEvent -Timestamp $ts -Severity $severity -Source $moduleName `
                     -Message $m.Groups[4].Value -RawLine $rawLine -SourceFile $SourceFile `
                     -SourceFormat 'FortiClientLocal' -LineNumber $lineNum -Extra $extra
                 $entries.Add($prevEntry)
-            } elseif ($prevEntry) {
+                continue
+            }
+
+            # Continuation line — append to previous entry
+            if ($prevEntry) {
                 $prevEntry.RawLine += "`n$rawLine"
                 $prevEntry.Message += "`n$rawLine"
             }
@@ -972,10 +1036,12 @@ function Invoke-DetectLogFormat {
         if ($line -match 'logid=' -and $line -match 'type=' -and ($line -match 'devname=' -or $line -match 'devid=')) { return 'FortiGateKV' }
     }
 
-    # FortiClient Local
+    # FortiClient Local — tab-delimited format (7.2+) or legacy bracket format
     $fcMatch = 0
     foreach ($line in $firstLines) {
-        if ($line -match '^\[[\d-]+ [\d:]+\]\s+\[\w+\]\s+\[[\w.-]+\]') { $fcMatch++ }
+        if ($line -match '^\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M\t\w+\t') { $fcMatch++ }
+        elseif ($line -match 'fctver=' -or $line -match 'devid="?FCT') { $fcMatch += 2 }
+        elseif ($line -match '^\[[\d-]+ [\d:]+\]\s+\[\w+\]\s+\[[\w.-]+\]') { $fcMatch++ }
     }
     if ($fcMatch -ge 2) { return 'FortiClientLocal' }
 
