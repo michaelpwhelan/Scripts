@@ -279,7 +279,7 @@ function Get-OsTicketStatus {
             AssignedTo   = if ($response.assigned) { [string]$response.assigned } else { "" }
         }
 
-        Write-Log "osTicket #$TicketNumber: status=$($result.Status)" -Level INFO
+        Write-Log "osTicket #${TicketNumber}: status=$($result.Status)" -Level INFO
         return $result
     } catch {
         $statusCode = 0

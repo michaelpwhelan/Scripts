@@ -522,8 +522,7 @@ function New-MainForm {
     $grid.RowHeadersVisible = $false
     $grid.ColumnHeadersHeightSizeMode = "AutoSize"
     $grid.AutoSizeColumnsMode = "None"
-    $grid.DoubleBuffered = $true  # Requires reflection for DataGridView
-    # Enable double buffering via reflection
+    # Enable double buffering via reflection (DoubleBuffered is a protected property)
     $dgvType = $grid.GetType()
     $pi = $dgvType.GetProperty("DoubleBuffered", [System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
     if ($pi) { $pi.SetValue($grid, $true) }
