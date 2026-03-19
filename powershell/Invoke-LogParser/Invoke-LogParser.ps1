@@ -76,11 +76,20 @@
 .PARAMETER Section
     Extract a specific config section from a FortiGate config file.
 
+.PARAMETER DiffPath
+    Compare the file in -Path against this file.
+
 .PARAMETER Clipboard
     Copy output to Windows clipboard (via Set-Clipboard).
 
 .PARAMETER Open
     Auto-open the exported file after creation.
+
+.PARAMETER EmailTo
+    Email address to send the report to. Requires -SmtpServer.
+
+.PARAMETER SmtpServer
+    SMTP server for email delivery.
 
 .PARAMETER InputObject
     Accept piped input. Requires -Format since auto-detection needs a file.
@@ -129,6 +138,10 @@
 .EXAMPLE
     .\Invoke-LogParser.ps1 -Path firewall.log -Highlight "10\.12\.1\.50" -OutputFormat Grid
     Show all events with the IP 10.12.1.50 highlighted in color.
+
+.EXAMPLE
+    .\Invoke-LogParser.ps1 -Path config-old.conf -DiffPath config-new.conf -Section "firewall policy"
+    Diff two FortiGate configs, showing only firewall policy changes.
 
 .EXAMPLE
     .\Invoke-LogParser.ps1 -Path firewall.log -Filter "action:deny" -Clipboard
@@ -222,10 +235,19 @@ param(
     [string]$Section,
 
     [Parameter(ParameterSetName = 'Parse')]
+    [string[]]$DiffPath,
+
+    [Parameter(ParameterSetName = 'Parse')]
     [switch]$Clipboard,
 
     [Parameter(ParameterSetName = 'Parse')]
     [switch]$Open,
+
+    [Parameter(ParameterSetName = 'Parse')]
+    [string]$EmailTo,
+
+    [Parameter(ParameterSetName = 'Parse')]
+    [string]$SmtpServer,
 
     [Parameter(ParameterSetName = 'Parse', ValueFromPipeline)]
     [string[]]$InputObject,
@@ -246,13 +268,14 @@ begin {
 # SECTION 1: Configuration
 # ============================================================================
 
-$script:Version = '7.0.0'
+$script:Version = '6.0.0'
 $script:UseAnsi = ($env:WT_SESSION) -or ($PSVersionTable.PSVersion.Major -ge 7) -or ($env:TERM_PROGRAM -eq 'vscode') -or ($env:COLORTERM -eq 'truecolor')
 $script:NoColorFlag = $NoColor.IsPresent
 $script:QuietFlag = $Quiet.IsPresent
 $script:PipedLines = [System.Collections.Generic.List[string]]::new()
 $script:TempDirs = [System.Collections.Generic.List[string]]::new()
 $script:RawFileLines = @{}
+$script:Bookmarks = [System.Collections.Generic.List[object]]::new()
 
 $script:OutputRedirected = $false
 try { $script:OutputRedirected = [Console]::IsOutputRedirected } catch {}
@@ -298,92 +321,94 @@ $script:SevColor = @{
 # SECTION 2: Enrichment Data
 # ============================================================================
 
-$script:Enrichment = @{
-    FortiSubtype = @{
-        "traffic/forward"="Forwarded traffic";"traffic/local"="Local traffic";"traffic/sniffer"="Sniffer"
-        "utm/webfilter"="Web filter";"utm/av"="Antivirus";"utm/ips"="IPS";"utm/app-ctrl"="Application control"
-        "utm/dlp"="DLP";"utm/dns"="DNS filter";"utm/ssl"="SSL inspection";"utm/emailfilter"="Email filter"
-        "utm/cifs"="CIFS";"utm/ssh"="SSH inspection"
-        "event/system"="System event";"event/vpn"="VPN event";"event/user"="User event";"event/ha"="HA event"
-        "event/wad"="WAD event";"event/ipsecvpn"="IPsec VPN";"event/route"="Routing"
-        "event/connector"="Fabric connector";"event/fortiextender"="FortiExtender";"event/wireless"="Wireless"
-    }
-    FortiClient = @{
-        "sslvpn"="VPN";"vpn"="VPN";"av"="Antivirus";"malware"="Antivirus";"webfilter"="Web Filter"
-        "ems"="EMS";"update"="Update";"endpoint"="Endpoint";"sandbox"="Sandbox";"firewall"="Firewall"
-    }
-    FortiGateLogId = @{
-        "0001"="Traffic: Forward";"0002"="Traffic: Local";"0003"="Traffic: Multicast"
-        "0100"="Event: System";"0101"="Event: IPsec";"0102"="Event: HA";"0103"="Event: Compliance"
-        "0104"="Event: VPN";"0200"="Event: User";"0300"="Event: Router";"0400"="Event: WAD"
-        "1600"="UTM: Virus";"1700"="UTM: Web Filter";"1800"="UTM: IPS";"1900"="UTM: Email Filter"
-        "2000"="UTM: DLP";"2100"="UTM: App Control";"2200"="UTM: VoIP";"2300"="UTM: DNS"
-    }
-    EventId = @{
-        1="Application Error";2="Application Hang";41="Kernel power failure (unexpected shutdown)"
-        104="Event log cleared";1000="Application Error (faulting module)";1001="Windows Error Reporting"
-        1002="Application Hang (not responding)";1014="DNS name resolution timeout"
-        1102="Security audit log cleared (tampering indicator)";2004="Resource exhaustion diagnosis"
-        4624="Successful logon";4625="Failed logon";4634="Account logoff";4647="User initiated logoff"
-        4648="Logon with explicit credentials (runas/lateral movement)"
-        4656="Handle to object requested";4657="Registry value modified";4663="Attempt to access object"
-        4670="Permissions on object changed";4672="Special privileges assigned to new logon"
-        4673="Privileged service called";4688="New process created";4689="Process exited"
-        4692="Backup of data protection master key";4697="Service installed on the system"
-        4698="Scheduled task created";4699="Scheduled task deleted"
-        4700="Scheduled task enabled";4701="Scheduled task disabled";4702="Scheduled task updated"
-        4719="System audit policy changed";4720="User account created";4722="User account enabled"
-        4723="Password change attempted";4724="Password reset attempted"
-        4725="User account disabled";4726="User account deleted"
-        4727="Security-enabled global group created";4728="Member added to global group"
-        4729="Member removed from global group";4730="Global group deleted"
-        4731="Security-enabled local group created";4732="Member added to local group"
-        4733="Member removed from local group";4734="Local group deleted";4735="Local group changed"
-        4738="User account changed";4740="Account locked out"
-        4741="Computer account created";4742="Computer account changed";4743="Computer account deleted"
-        4756="Member added to universal group";4757="Member removed from universal group"
-        4767="Account unlocked";4768="Kerberos TGT requested";4769="Kerberos service ticket requested"
-        4770="Kerberos service ticket renewed";4771="Kerberos pre-authentication failed"
-        4776="NTLM credential validation";4778="Session reconnected";4779="Session disconnected"
-        4797="Blank password query";4798="User local group membership enumerated"
-        4799="Security-enabled local group membership enumerated"
-        4800="Workstation locked";4801="Workstation unlocked"
-        4946="Firewall rule added";4947="Firewall rule modified";4948="Firewall rule deleted"
-        4950="Firewall setting changed";5024="Firewall service started";5025="Firewall service stopped"
-        5038="Code integrity: image hash not valid";5136="Directory service object modified"
-        5140="Network share accessed";5142="Network share added";5144="Network share deleted"
-        5145="Detailed file share check";5152="WFP packet dropped";5156="WFP connection allowed"
-        5157="WFP connection blocked";6005="Event Log started (boot)";6006="Event Log stopped (shutdown)"
-        6008="Unexpected shutdown";6013="System uptime"
-        6272="NPS granted access";6273="NPS denied access";6274="NPS discarded request"
-        6275="NPS discarded accounting";6276="NPS quarantined user"
-        7001="User logon notification";7002="User logoff notification"
-        7034="Service crashed";7036="Service state change";7040="Service start type changed"
-        7045="New service installed";800="PowerShell pipeline execution"
-        4103="PowerShell Module Logging";4104="PowerShell Script Block Logging"
-        1006="Defender: Malware detected";1007="Defender: Action taken on malware"
-        1116="Defender: Real-time protection threat";1117="Defender: Real-time protection action"
-        5001="Defender: Real-time protection disabled"
-        18500="Hyper-V VM started";18502="Hyper-V VM stopped";18512="Hyper-V VM migration started"
-        10="DHCP: New lease";11="DHCP: Lease renewed";12="DHCP: Lease released";15="DHCP: Lease denied"
-    }
-    NpsReason = @{
-        0="IAS_SUCCESS";1="IAS_INTERNAL_ERROR";2="IAS_ACCESS_DENIED";3="IAS_MALFORMED_REQUEST"
-        4="IAS_GLOBAL_CATALOG_UNAVAILABLE";5="IAS_DOMAIN_UNAVAILABLE";6="IAS_SERVER_UNAVAILABLE"
-        7="IAS_NO_SUCH_DOMAIN";8="IAS_NO_SUCH_USER"
-        16="Authentication failed: credentials mismatch";17="Change password failure"
-        18="Unable to use specified auth type";21="IAS_CHANGE_PASSWORD_FAILURE"
-        22="Client not authenticated (certificate)";23="IAS_UNEXPECTED_ERROR"
-        32="IAS_LOCAL_USERS_ONLY";33="IAS_PASSWORD_MUST_CHANGE"
-        34="IAS_ACCOUNT_DISABLED";35="IAS_ACCOUNT_EXPIRED";36="IAS_ACCOUNT_LOCKED_OUT"
-        37="IAS_INVALID_DAY_OF_WEEK";38="IAS_INVALID_TIME_OF_DAY"
-        48="No matching connection request policy";49="No matching network policy"
-        64="IAS_DIALIN_LOCKED_OUT";65="No dial-in permission";66="Restricted to called station"
-        67="Restricted to calling station";68="Restricted to port type";69="Restricted to auth type"
-        70="Invalid EAP type";73="Session timed out";80="IAS_NO_RECORD"
-        96="IAS_SESSION_TIMEOUT";112="Remote RADIUS server no response"
-        113="Remote RADIUS server unreachable";256="IAS_NO_POLICY_MATCH"
-    }
+$script:FortiSubtypeLookup = @{
+    "traffic/forward"="Forwarded traffic";"traffic/local"="Local traffic";"traffic/sniffer"="Sniffer"
+    "utm/webfilter"="Web filter";"utm/av"="Antivirus";"utm/ips"="IPS";"utm/app-ctrl"="Application control"
+    "utm/dlp"="DLP";"utm/dns"="DNS filter";"utm/ssl"="SSL inspection";"utm/emailfilter"="Email filter"
+    "utm/cifs"="CIFS";"utm/ssh"="SSH inspection"
+    "event/system"="System event";"event/vpn"="VPN event";"event/user"="User event";"event/ha"="HA event"
+    "event/wad"="WAD event";"event/ipsecvpn"="IPsec VPN";"event/route"="Routing"
+    "event/connector"="Fabric connector";"event/fortiextender"="FortiExtender";"event/wireless"="Wireless"
+}
+
+$script:FortiClientModuleLookup = @{
+    "sslvpn"="VPN";"vpn"="VPN";"av"="Antivirus";"malware"="Antivirus";"webfilter"="Web Filter"
+    "ems"="EMS";"update"="Update";"endpoint"="Endpoint";"sandbox"="Sandbox";"firewall"="Firewall"
+}
+
+$script:FortiGateLogIdRanges = @{
+    "0001"="Traffic: Forward";"0002"="Traffic: Local";"0003"="Traffic: Multicast"
+    "0100"="Event: System";"0101"="Event: IPsec";"0102"="Event: HA";"0103"="Event: Compliance"
+    "0104"="Event: VPN";"0200"="Event: User";"0300"="Event: Router";"0400"="Event: WAD"
+    "1600"="UTM: Virus";"1700"="UTM: Web Filter";"1800"="UTM: IPS";"1900"="UTM: Email Filter"
+    "2000"="UTM: DLP";"2100"="UTM: App Control";"2200"="UTM: VoIP";"2300"="UTM: DNS"
+}
+
+$script:EventIdLookup = @{
+    1="Application Error";2="Application Hang";41="Kernel power failure (unexpected shutdown)"
+    104="Event log cleared";1000="Application Error (faulting module)";1001="Windows Error Reporting"
+    1002="Application Hang (not responding)";1014="DNS name resolution timeout"
+    1102="Security audit log cleared (tampering indicator)";2004="Resource exhaustion diagnosis"
+    4624="Successful logon";4625="Failed logon";4634="Account logoff";4647="User initiated logoff"
+    4648="Logon with explicit credentials (runas/lateral movement)"
+    4656="Handle to object requested";4657="Registry value modified";4663="Attempt to access object"
+    4670="Permissions on object changed";4672="Special privileges assigned to new logon"
+    4673="Privileged service called";4688="New process created";4689="Process exited"
+    4692="Backup of data protection master key";4697="Service installed on the system"
+    4698="Scheduled task created";4699="Scheduled task deleted"
+    4700="Scheduled task enabled";4701="Scheduled task disabled";4702="Scheduled task updated"
+    4719="System audit policy changed";4720="User account created";4722="User account enabled"
+    4723="Password change attempted";4724="Password reset attempted"
+    4725="User account disabled";4726="User account deleted"
+    4727="Security-enabled global group created";4728="Member added to global group"
+    4729="Member removed from global group";4730="Global group deleted"
+    4731="Security-enabled local group created";4732="Member added to local group"
+    4733="Member removed from local group";4734="Local group deleted";4735="Local group changed"
+    4738="User account changed";4740="Account locked out"
+    4741="Computer account created";4742="Computer account changed";4743="Computer account deleted"
+    4756="Member added to universal group";4757="Member removed from universal group"
+    4767="Account unlocked";4768="Kerberos TGT requested";4769="Kerberos service ticket requested"
+    4770="Kerberos service ticket renewed";4771="Kerberos pre-authentication failed"
+    4776="NTLM credential validation";4778="Session reconnected";4779="Session disconnected"
+    4797="Blank password query";4798="User local group membership enumerated"
+    4799="Security-enabled local group membership enumerated"
+    4800="Workstation locked";4801="Workstation unlocked"
+    4946="Firewall rule added";4947="Firewall rule modified";4948="Firewall rule deleted"
+    4950="Firewall setting changed";5024="Firewall service started";5025="Firewall service stopped"
+    5038="Code integrity: image hash not valid";5136="Directory service object modified"
+    5140="Network share accessed";5142="Network share added";5144="Network share deleted"
+    5145="Detailed file share check";5152="WFP packet dropped";5156="WFP connection allowed"
+    5157="WFP connection blocked";6005="Event Log started (boot)";6006="Event Log stopped (shutdown)"
+    6008="Unexpected shutdown";6013="System uptime"
+    6272="NPS granted access";6273="NPS denied access";6274="NPS discarded request"
+    6275="NPS discarded accounting";6276="NPS quarantined user"
+    7001="User logon notification";7002="User logoff notification"
+    7034="Service crashed";7036="Service state change";7040="Service start type changed"
+    7045="New service installed";800="PowerShell pipeline execution"
+    4103="PowerShell Module Logging";4104="PowerShell Script Block Logging"
+    1006="Defender: Malware detected";1007="Defender: Action taken on malware"
+    1116="Defender: Real-time protection threat";1117="Defender: Real-time protection action"
+    5001="Defender: Real-time protection disabled"
+    18500="Hyper-V VM started";18502="Hyper-V VM stopped";18512="Hyper-V VM migration started"
+    10="DHCP: New lease";11="DHCP: Lease renewed";12="DHCP: Lease released";15="DHCP: Lease denied"
+}
+
+$script:NpsReasonLookup = @{
+    0="IAS_SUCCESS";1="IAS_INTERNAL_ERROR";2="IAS_ACCESS_DENIED";3="IAS_MALFORMED_REQUEST"
+    4="IAS_GLOBAL_CATALOG_UNAVAILABLE";5="IAS_DOMAIN_UNAVAILABLE";6="IAS_SERVER_UNAVAILABLE"
+    7="IAS_NO_SUCH_DOMAIN";8="IAS_NO_SUCH_USER"
+    16="Authentication failed: credentials mismatch";17="Change password failure"
+    18="Unable to use specified auth type";21="IAS_CHANGE_PASSWORD_FAILURE"
+    22="Client not authenticated (certificate)";23="IAS_UNEXPECTED_ERROR"
+    32="IAS_LOCAL_USERS_ONLY";33="IAS_PASSWORD_MUST_CHANGE"
+    34="IAS_ACCOUNT_DISABLED";35="IAS_ACCOUNT_EXPIRED";36="IAS_ACCOUNT_LOCKED_OUT"
+    37="IAS_INVALID_DAY_OF_WEEK";38="IAS_INVALID_TIME_OF_DAY"
+    48="No matching connection request policy";49="No matching network policy"
+    64="IAS_DIALIN_LOCKED_OUT";65="No dial-in permission";66="Restricted to called station"
+    67="Restricted to calling station";68="Restricted to port type";69="Restricted to auth type"
+    70="Invalid EAP type";73="Session timed out";80="IAS_NO_RECORD"
+    96="IAS_SESSION_TIMEOUT";112="Remote RADIUS server no response"
+    113="Remote RADIUS server unreachable";256="IAS_NO_POLICY_MATCH"
 }
 
 # ============================================================================
@@ -391,9 +416,8 @@ $script:Enrichment = @{
 # ============================================================================
 
 # Compiled regex patterns for performance
-$script:KvRegex = [regex]::new('([\w-]+)=("(?:[^"\\]|\\.)*"|[^\s]+)', 'Compiled')
+$script:KvRegex = [regex]::new('(\w+)=("(?:[^"\\]|\\.)*"|[^\s]+)', 'Compiled')
 $script:FortiClientPattern = [regex]::new('^\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]\s+\[(\w+)\]\s+\[([\w.-]+)\]\s+(.*)', 'Compiled')
-$script:FortiClientTabPattern = [regex]::new('^(\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M)\t(\w+)\t([\w.-]+)\t(.*)', 'Compiled, IgnoreCase')
 
 function New-LogEvent {
     param(
@@ -453,22 +477,6 @@ function Get-SeverityFromText {
     if ($t -match '\bwarn|timeout|expire|\bdown\b') { return 'Medium' }
     if ($t -match '\bdebug\b|\btrace\b|\bverbose\b') { return 'Info' }
     return 'Low'
-}
-
-function Get-SafeEventId { param($Value); return ($Value -as [int]) }
-
-function Add-EventsToList {
-    param([System.Collections.Generic.List[object]]$Target, $Events)
-    if ($null -eq $Events) { return }
-    if ($Events -is [System.Collections.Generic.List[object]]) {
-        $Target.AddRange($Events)
-    } elseif ($Events -is [array]) {
-        $Target.AddRange($Events)
-    } elseif ($Events -is [System.Collections.IEnumerable] -and $Events -isnot [string] -and $Events -isnot [hashtable]) {
-        foreach ($e in $Events) { $Target.Add($e) }
-    } else {
-        $Target.Add($Events)
-    }
 }
 
 function Invoke-ParseFortiGateConf {
@@ -625,7 +633,7 @@ function Invoke-ParseFortiGateKV {
 
             if ($extra['type'] -and $extra['subtype']) {
                 $ts2 = "$($extra['type'])/$($extra['subtype'])"
-                if ($script:Enrichment.FortiSubtype.ContainsKey($ts2)) { $extra['SubtypeDescription'] = $script:Enrichment.FortiSubtype[$ts2] }
+                if ($script:FortiSubtypeLookup.ContainsKey($ts2)) { $extra['SubtypeDescription'] = $script:FortiSubtypeLookup[$ts2] }
             }
 
             $severity = Get-SeverityFromFortiLevel -Level $extra['level'] -Action $extra['action'] -Type $extra['type'] -RawLine $rawLine
@@ -677,65 +685,6 @@ function Invoke-ParseFortiClientLocal {
         while (-not $reader.EndOfStream) {
             $rawLine = $reader.ReadLine(); $lineNum++
             if ([string]::IsNullOrWhiteSpace($rawLine)) { continue }
-
-            # Try tab-delimited format first: TIMESTAMP<TAB>LEVEL<TAB>CATEGORY<TAB>MESSAGE
-            $m = $script:FortiClientTabPattern.Match($rawLine)
-            if ($m.Success) {
-                $ts = [datetime]::MinValue
-                [datetime]::TryParse($m.Groups[1].Value, [ref]$ts) | Out-Null
-                $rawLevel = $m.Groups[2].Value.ToLower()
-                $category = $m.Groups[3].Value
-                $msgField = $m.Groups[4].Value
-
-                $extra = @{
-                    Category = $category
-                    Module = $category
-                    ModuleName = if ($script:Enrichment.FortiClient.ContainsKey($category.ToLower())) {
-                        $script:Enrichment.FortiClient[$category.ToLower()]
-                    } else { $category }
-                }
-
-                # Check if MESSAGE field contains structured key=value event data
-                if ($msgField -match '^date=\d{4}-\d{2}-\d{2}\s+time=') {
-                    $extra['LogType'] = 'Event'
-                    $kvMatches = $script:KvRegex.Matches($msgField)
-                    foreach ($kvm in $kvMatches) { $extra[$kvm.Groups[1].Value] = $kvm.Groups[2].Value.Trim('"') }
-
-                    # Use KV level if present, fall back to tab-delimited level
-                    $kvLevel = if ($extra['level']) { $extra['level'] } else { $rawLevel }
-                    $severity = switch ($kvLevel.ToLower()) {
-                        'emergency'   { 'Critical' } 'alert' { 'Critical' } 'critical' { 'Critical' }
-                        'error'       { 'High' } 'warning' { 'Medium' }
-                        'notice'      { 'Low' } 'information' { 'Low' } 'info' { 'Low' }
-                        'debug'       { 'Info' }
-                        default       { Get-SeverityFromText $msgField }
-                    }
-                    $source = if ($extra['hostname']) { $extra['hostname'] }
-                        elseif ($extra['devid']) { $extra['devid'] }
-                        else { $extra['ModuleName'] }
-                    $msg = if ($extra['msg']) { $extra['msg'] }
-                        elseif ($extra['eventtype']) { "$($extra['type'])/$($extra['subtype']): $($extra['eventtype'])" }
-                        else { $msgField.Substring(0, [Math]::Min(200, $msgField.Length)) }
-                } else {
-                    # Format A: debug/internal line
-                    $extra['LogType'] = 'Debug'
-                    $severity = switch ($rawLevel) {
-                        'critical' { 'Critical' } 'error' { 'High' } 'warning' { 'Medium' }
-                        'info' { 'Low' } 'debug' { 'Info' }
-                        default { Get-SeverityFromText $rawLevel }
-                    }
-                    $source = $extra['ModuleName']
-                    $msg = $msgField
-                }
-
-                $prevEntry = New-LogEvent -Timestamp $ts -Severity $severity -Source $source `
-                    -Message $msg -RawLine $rawLine -SourceFile $SourceFile `
-                    -SourceFormat 'FortiClientLocal' -LineNumber $lineNum -Extra $extra
-                $entries.Add($prevEntry)
-                continue
-            }
-
-            # Try legacy bracket format: [YYYY-MM-DD HH:MM:SS] [level] [module] message
             $m = $script:FortiClientPattern.Match($rawLine)
             if ($m.Success) {
                 $ts = [datetime]::MinValue
@@ -746,19 +695,15 @@ function Invoke-ParseFortiClientLocal {
                     'INFO' { 'Low' } 'DEBUG' { 'Info' } default { Get-SeverityFromText $rawLevel }
                 }
                 $module = $m.Groups[3].Value
-                $moduleName = if ($script:Enrichment.FortiClient.ContainsKey($module.ToLower())) {
-                    $script:Enrichment.FortiClient[$module.ToLower()]
+                $moduleName = if ($script:FortiClientModuleLookup.ContainsKey($module.ToLower())) {
+                    $script:FortiClientModuleLookup[$module.ToLower()]
                 } else { $module }
-                $extra = @{ Module = $module; ModuleName = $moduleName; LogType = 'Event' }
+                $extra = @{ Module = $module; ModuleName = $moduleName }
                 $prevEntry = New-LogEvent -Timestamp $ts -Severity $severity -Source $moduleName `
                     -Message $m.Groups[4].Value -RawLine $rawLine -SourceFile $SourceFile `
                     -SourceFormat 'FortiClientLocal' -LineNumber $lineNum -Extra $extra
                 $entries.Add($prevEntry)
-                continue
-            }
-
-            # Continuation line — append to previous entry
-            if ($prevEntry) {
+            } elseif ($prevEntry) {
                 $prevEntry.RawLine += "`n$rawLine"
                 $prevEntry.Message += "`n$rawLine"
             }
@@ -792,7 +737,7 @@ function Invoke-ParseFortiSwitchEvent {
 
             if ($extra['type'] -and $extra['subtype']) {
                 $ts2 = "$($extra['type'])/$($extra['subtype'])"
-                if ($script:Enrichment.FortiSubtype.ContainsKey($ts2)) { $extra['SubtypeDescription'] = $script:Enrichment.FortiSubtype[$ts2] }
+                if ($script:FortiSubtypeLookup.ContainsKey($ts2)) { $extra['SubtypeDescription'] = $script:FortiSubtypeLookup[$ts2] }
             }
 
             $msgField = if ($extra['msg']) { $extra['msg'] } else { '' }
@@ -908,8 +853,8 @@ function Invoke-ParseWindowsEvtx {
             foreach ($evt in $events) {
                 $lineNum++
                 $extra = @{ EventID = $evt.Id; ProviderName = $evt.ProviderName; LogName = $evt.LogName }
-                if ($script:Enrichment.EventId.ContainsKey([int]$evt.Id)) {
-                    $extra['EventDescription'] = $script:Enrichment.EventId[[int]$evt.Id]
+                if ($script:EventIdLookup.ContainsKey([int]$evt.Id)) {
+                    $extra['EventDescription'] = $script:EventIdLookup[[int]$evt.Id]
                 }
                 try {
                     $evtXml = [xml]$evt.ToXml()
@@ -927,7 +872,7 @@ function Invoke-ParseWindowsEvtx {
                             }
                         }
                     }
-                } catch { Write-Verbose "Event XML extraction: $_" }
+                } catch {}
                 $severity = switch ($evt.Level) {
                     1 { 'Critical' } 2 { 'High' } 3 { 'Medium' } 4 { 'Low' } 5 { 'Info' }
                     0 { if ($evt.Id -eq 1102) { 'Medium' } else { 'Low' } }
@@ -965,7 +910,7 @@ function Invoke-ParseWindowsEvtx {
                 $eid = 0; $provider = ''; $computer = ''; $channel = ''; $level = 0
                 $timeStr = ''
                 if ($sys) {
-                    if ($sys.EventID) { $eid = Get-SafeEventId $(if ($sys.EventID.InnerText) { $sys.EventID.InnerText } else { $sys.EventID }); if (-not $eid) { $eid = 0 } }
+                    if ($sys.EventID) { $eid = [int]$(if ($sys.EventID.InnerText) { $sys.EventID.InnerText } else { $sys.EventID }) }
                     if ($sys.Provider) { $provider = $sys.Provider.Name }
                     if ($sys.Computer) { $computer = $sys.Computer }
                     if ($sys.Channel) { $channel = $sys.Channel }
@@ -975,7 +920,7 @@ function Invoke-ParseWindowsEvtx {
                 $ts = [datetime]::MinValue
                 if ($timeStr) { [datetime]::TryParse($timeStr, [ref]$ts) | Out-Null }
                 $extra = @{ EventID = $eid; ProviderName = $provider; LogName = $channel; Computer = $computer }
-                if ($script:Enrichment.EventId.ContainsKey($eid)) { $extra['EventDescription'] = $script:Enrichment.EventId[$eid] }
+                if ($script:EventIdLookup.ContainsKey($eid)) { $extra['EventDescription'] = $script:EventIdLookup[$eid] }
                 $eventData = $evtNode.EventData
                 if ($eventData) {
                     foreach ($data in $eventData.Data) {
@@ -1036,12 +981,10 @@ function Invoke-DetectLogFormat {
         if ($line -match 'logid=' -and $line -match 'type=' -and ($line -match 'devname=' -or $line -match 'devid=')) { return 'FortiGateKV' }
     }
 
-    # FortiClient Local — tab-delimited format (7.2+) or legacy bracket format
+    # FortiClient Local
     $fcMatch = 0
     foreach ($line in $firstLines) {
-        if ($line -match '^\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M\t\w+\t') { $fcMatch++ }
-        elseif ($line -match 'fctver=' -or $line -match 'devid="?FCT') { $fcMatch += 2 }
-        elseif ($line -match '^\[[\d-]+ [\d:]+\]\s+\[\w+\]\s+\[[\w.-]+\]') { $fcMatch++ }
+        if ($line -match '^\[[\d-]+ [\d:]+\]\s+\[\w+\]\s+\[[\w.-]+\]') { $fcMatch++ }
     }
     if ($fcMatch -ge 2) { return 'FortiClientLocal' }
 
@@ -1115,7 +1058,7 @@ function Invoke-FilterEvents {
 function Parse-FilterConditions {
     param([string]$FilterText)
     $conditions = [System.Collections.Generic.List[object]]::new()
-    $tokens = [regex]::Matches($FilterText, '(NOT\s+)?([\w-]+):("(?:[^"\\]|\\.)*"|[^\s]+)|AND|OR')
+    $tokens = [regex]::Matches($FilterText, '(NOT\s+)?(\w+):("(?:[^"\\]|\\.)*"|[^\s]+)|AND|OR')
     $logicOp = 'AND'
     foreach ($tok in $tokens) {
         $val = $tok.Value
@@ -1123,7 +1066,7 @@ function Parse-FilterConditions {
         if ($val -eq 'OR') { $logicOp = 'OR'; continue }
         $negate = $false
         if ($val -match '^NOT\s+') { $negate = $true; $val = $val -replace '^NOT\s+', '' }
-        if ($val -match '^([\w-]+):(.+)$') {
+        if ($val -match '^(\w+):(.+)$') {
             $field = $Matches[1]; $pattern = $Matches[2].Trim('"')
             $op = 'eq'
             if ($pattern.StartsWith('>')) { $op = 'gt'; $pattern = $pattern.Substring(1) }
@@ -1131,6 +1074,7 @@ function Parse-FilterConditions {
             elseif ($pattern.Contains('*')) { $op = 'wildcard' }
             $conditions.Add(@{ Field = $field; Pattern = $pattern; Op = $op; Negate = $negate; Logic = $logicOp })
         }
+        $logicOp = 'AND'
     }
     return $conditions
 }
@@ -1290,7 +1234,7 @@ function Invoke-AnalyzeFailedLogins {
         $user = $null; $sourceIp = $null; $isFailedLogin = $false
         $ex = $entry.Extra
 
-        if ($ex['EventID'] -and (Get-SafeEventId $ex['EventID']) -eq 4625) {
+        if ($ex['EventID'] -and [int]$ex['EventID'] -eq 4625) {
             $user = $ex['TargetUserName']; $sourceIp = if ($ex['IpAddress']) { $ex['IpAddress'] } else { $ex['WorkstationName'] }
             $isFailedLogin = $true
         } elseif ($ex['PacketTypeName'] -eq 'Access-Reject') {
@@ -1301,9 +1245,9 @@ function Invoke-AnalyzeFailedLogins {
             $user = $ex['user']; $sourceIp = $ex['srcip']; $isFailedLogin = $true
         } elseif ($ex['action'] -match 'deny' -and $ex['subtype'] -eq 'auth') {
             $user = $ex['user']; $sourceIp = $ex['srcip']; $isFailedLogin = $true
-        } elseif ($ex['EventID'] -and (Get-SafeEventId $ex['EventID']) -eq 4771) {
+        } elseif ($ex['EventID'] -and [int]$ex['EventID'] -eq 4771) {
             $user = $ex['TargetUserName']; $sourceIp = $ex['IpAddress']; $isFailedLogin = $true
-        } elseif ($ex['EventID'] -and (Get-SafeEventId $ex['EventID']) -eq 6273) {
+        } elseif ($ex['EventID'] -and [int]$ex['EventID'] -eq 6273) {
             $user = if ($ex['SubjectUserName']) { $ex['SubjectUserName'] } else { $ex['FullyQualifiedSubjectUserName'] }
             $sourceIp = $ex['CallingStationID']; $isFailedLogin = $true
         }
@@ -1379,9 +1323,6 @@ function Invoke-AnalyzeVpnSessions {
             $prev = $userSessions[$i - 1]; $curr = $userSessions[$i]
             if (-not $prev.RemoteIP -or -not $curr.RemoteIP) { continue }
             if ($curr.StartTime -eq [datetime]::MinValue -or $prev.StartTime -eq [datetime]::MinValue) { continue }
-            # Skip IPv6 and RFC 1918 private addresses for impossible travel
-            if ($prev.RemoteIP -match ':' -or $curr.RemoteIP -match ':') { continue }
-            if ($prev.RemoteIP -match '^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)' -or $curr.RemoteIP -match '^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)') { continue }
             $timeDiff = ($curr.StartTime - $prev.StartTime).TotalMinutes
             if ($timeDiff -le 30 -and $timeDiff -ge 0) {
                 $pp = $prev.RemoteIP -split '\.'; $cp = $curr.RemoteIP -split '\.'
@@ -1751,7 +1692,6 @@ function Format-LogGrid {
 function Format-LogList {
     param(
         [System.Collections.Generic.List[object]]$Events,
-        [string[]]$FieldList = @(),
         [string]$HighlightPattern = '',
         [int]$Max = 0
     )
@@ -1770,11 +1710,6 @@ function Format-LogList {
         $rawText = if ($e.RawLine) { $e.RawLine } else { '' }
         $fields['Message'] = ($msgText -replace "`n", "`n              ")
         $fields['Raw'] = ($rawText -replace "`n", "`n              ").Substring(0, [Math]::Min(500, $rawText.Length))
-        if ($FieldList.Count -gt 0) {
-            $filtered = [ordered]@{}
-            foreach ($f in $FieldList) { if ($fields.Contains($f)) { $filtered[$f] = $fields[$f] } }
-            $fields = $filtered
-        }
         $maxLabelMeasure = ($fields.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
         $maxLabel = if ($maxLabelMeasure) { $maxLabelMeasure } else { 10 }
         foreach ($kv in $fields.GetEnumerator()) {
@@ -1791,7 +1726,7 @@ function Format-LogList {
 }
 
 function Format-LogRaw {
-    param([System.Collections.Generic.List[object]]$Events, [string[]]$FieldList = @(), [int]$Max = 0)
+    param([System.Collections.Generic.List[object]]$Events, [int]$Max = 0)
     $displayEvents = if ($Max -gt 0 -and $Events.Count -gt $Max) { $Events[0..($Max - 1)] } else { $Events }
     foreach ($e in $displayEvents) {
         $obj = [ordered]@{
@@ -1800,17 +1735,12 @@ function Format-LogRaw {
         foreach ($k in $e.Extra.Keys) {
             if ($k -notin @('Timestamp','Severity','Source','Message','RawLine')) { $obj[$k] = $e.Extra[$k] }
         }
-        if ($FieldList.Count -gt 0) {
-            $filtered = [ordered]@{}
-            foreach ($f in $FieldList) { if ($obj.Contains($f)) { $filtered[$f] = $obj[$f] } }
-            $obj = $filtered
-        }
         [PSCustomObject]$obj
     }
 }
 
 function Format-LogJson {
-    param([System.Collections.Generic.List[object]]$Events, [string[]]$FieldList = @(), [int]$Max = 0)
+    param([System.Collections.Generic.List[object]]$Events, [int]$Max = 0)
     $displayEvents = if ($Max -gt 0 -and $Events.Count -gt $Max) { $Events[0..($Max - 1)] } else { $Events }
     foreach ($e in $displayEvents) {
         $obj = [ordered]@{
@@ -1818,32 +1748,26 @@ function Format-LogJson {
             Severity = $e.Severity; Source = $e.Source; Message = $e.Message
         }
         foreach ($k in $e.Extra.Keys) { $obj[$k] = $e.Extra[$k] }
-        if ($FieldList.Count -gt 0) {
-            $filtered = [ordered]@{}
-            foreach ($f in $FieldList) { if ($obj.Contains($f)) { $filtered[$f] = $obj[$f] } }
-            $obj = $filtered
-        }
         $obj | ConvertTo-Json -Compress
     }
 }
 
 function Format-LogCsv {
-    param([System.Collections.Generic.List[object]]$Events, [string[]]$FieldList = @(), [int]$Max = 0)
+    param([System.Collections.Generic.List[object]]$Events, [int]$Max = 0)
     $displayEvents = if ($Max -gt 0 -and $Events.Count -gt $Max) { $Events[0..($Max - 1)] } else { $Events }
     # Discover all extra fields
     $allExtraKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($e in $displayEvents) { foreach ($k in $e.Extra.Keys) { $allExtraKeys.Add($k) | Out-Null } }
     $headers = @('Timestamp','Severity','Source','Message') + @($allExtraKeys | Sort-Object)
-    if ($FieldList.Count -gt 0) { $headers = @($headers | Where-Object { $_ -in $FieldList }) }
     $headers -join ','
     foreach ($e in $displayEvents) {
         $vals = @()
         $vals += if ($e.Timestamp -ne [datetime]::MinValue) { "`"$($e.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))`"" } else { '""' }
         $vals += "`"$($e.Severity)`""
-        $vals += "`"$(($e.Source -replace '"','""') -replace '[\r\n]',' ')`""
-        $vals += "`"$(($e.Message -replace '"','""') -replace '[\r\n]',' ')`""
+        $vals += "`"$($e.Source -replace '"','""')`""
+        $vals += "`"$(($e.Message -replace '"','""' -replace "`n",' '))`""
         foreach ($k in ($allExtraKeys | Sort-Object)) {
-            $v = if ($e.Extra.ContainsKey($k)) { ($e.Extra[$k] -replace '"','""') -replace '[\r\n]',' ' } else { '' }
+            $v = if ($e.Extra.ContainsKey($k)) { $e.Extra[$k] -replace '"','""' } else { '' }
             $vals += "`"$v`""
         }
         $vals -join ','
@@ -1934,55 +1858,6 @@ function Write-ContextBlock {
     Write-ColorText "  $([string][char]0x2500 * 60)" $c.Dim
 }
 
-function Write-FailedLoginResults {
-    param($Results)
-    $c = $script:C
-    if ($Results.Count -eq 0) { Write-Host 'No failed login events found.'; return }
-    Write-ColorText "$([string][char]0x2500 * 3) Failed Login Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-    Write-Host "  $($c.BoldWhite)$('User'.PadRight(30)) $('Count'.PadRight(8)) $('Unique IPs'.PadRight(12)) $('First Seen'.PadRight(20)) $('Last Seen'.PadRight(20)) Sources$($c.Reset)"
-    Write-ColorText "  $([string][char]0x2500 * 110)" $c.Dim
-    foreach ($r in $Results) {
-        $color = if ($r.Count -ge 10) { $c.Red } elseif ($r.Count -ge 5) { $c.Yellow } else { '' }
-        $fs = if ($r.FirstSeen -ne [datetime]::MinValue) { $r.FirstSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
-        $ls = if ($r.LastSeen -ne [datetime]::MinValue) { $r.LastSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
-        Write-Host "  $color$($r.User.PadRight(30)) $(($r.Count.ToString()).PadRight(8)) $(($r.SourceIPs.Count.ToString()).PadRight(12)) $($fs.PadRight(20)) $($ls.PadRight(20)) $($r.Sources -join ', ')$($c.Reset)"
-    }
-}
-
-function Write-VpnSessionResults {
-    param($Results)
-    $c = $script:C
-    Write-ColorText "$([string][char]0x2500 * 3) VPN Session Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-    Write-Host "  $($c.BoldWhite)$('User'.PadRight(25)) $('Start'.PadRight(20)) $('End'.PadRight(20)) $('Duration'.PadRight(15)) Remote IP$($c.Reset)"
-    foreach ($uk in $Results.Sessions.Keys) {
-        foreach ($s in $Results.Sessions[$uk]) {
-            $st = if ($s.StartTime -ne [datetime]::MinValue) { $s.StartTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
-            $et = if ($s.EndTime) { $s.EndTime.ToString('yyyy-MM-dd HH:mm') } else { '(active)' }
-            $dur = if ($s.Duration) { $s.Duration.ToString('d\.hh\:mm\:ss') } else { '' }
-            Write-Host "  $($s.User.PadRight(25)) $($st.PadRight(20)) $($et.PadRight(20)) $($dur.PadRight(15)) $($s.RemoteIP)"
-        }
-    }
-    if ($Results.ImpossibleTravel.Count -gt 0) {
-        Write-ColorText "`n  IMPOSSIBLE TRAVEL ($($Results.ImpossibleTravel.Count)):" $c.Red
-        foreach ($tf in $Results.ImpossibleTravel) {
-            Write-ColorText "    $($tf.User): $($tf.IP1) @ $($tf.Time1.ToString('HH:mm')) -> $($tf.IP2) @ $($tf.Time2.ToString('HH:mm')) ($($tf.MinutesBetween) min)" $c.Yellow
-        }
-    }
-}
-
-function Write-IpsecTunnelResults {
-    param($Results)
-    $c = $script:C
-    Write-ColorText "$([string][char]0x2500 * 3) IPsec Tunnel Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-    Write-Host "  Total: $($Results.Summary.TotalTunnels) | Up: $($Results.Summary.UpCount) | Down: $($Results.Summary.DownCount) | Flaps: $($Results.Summary.FlapCount)"
-    Write-Host "  $($c.BoldWhite)$('Tunnel'.PadRight(25)) $('Status'.PadRight(10)) $('Flaps'.PadRight(8)) Last Failure$($c.Reset)"
-    foreach ($tn in $Results.Tunnels.Keys) {
-        $t = $Results.Tunnels[$tn]
-        $color = if ($t.Status -eq 'Down') { $c.Red } elseif ($t.FlapCount -gt 0) { $c.Yellow } else { $c.Green }
-        Write-Host "  $color$($t.TunnelName.PadRight(25)) $($t.Status.PadRight(10)) $($t.FlapCount.ToString().PadRight(8)) $(if ($t.LastFailureReason) { $t.LastFailureReason } else { '-' })$($c.Reset)"
-    }
-}
-
 # ============================================================================
 # SECTION 7: Config Tools (FortiGate-specific)
 # ============================================================================
@@ -2007,6 +1882,48 @@ function Get-ConfigSection {
         }
     }
     return $results
+}
+
+function Compare-Configs {
+    param([string]$File1, [string]$File2, [string]$SectionFilter = '')
+    $lines1 = if ($SectionFilter) { Get-ConfigSection $File1 $SectionFilter } else { [System.IO.File]::ReadAllLines($File1) }
+    $lines2 = if ($SectionFilter) { Get-ConfigSection $File2 $SectionFilter } else { [System.IO.File]::ReadAllLines($File2) }
+
+    $set1 = @{}; $set2 = @{}
+    $idx = 0; foreach ($l in $lines1) { $set1[$l.Trim()] = $idx; $idx++ }
+    $idx = 0; foreach ($l in $lines2) { $set2[$l.Trim()] = $idx; $idx++ }
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    foreach ($l in $lines1) {
+        $t = $l.Trim()
+        if (-not $set2.ContainsKey($t)) {
+            $results.Add(@{ Type = 'Removed'; Line = $l; Section = '' })
+        }
+    }
+    foreach ($l in $lines2) {
+        $t = $l.Trim()
+        if (-not $set1.ContainsKey($t)) {
+            $results.Add(@{ Type = 'Added'; Line = $l; Section = '' })
+        }
+    }
+    return @{ Diffs = $results; Lines1 = $lines1; Lines2 = $lines2 }
+}
+
+function Format-ConfigDiff {
+    param($DiffResult)
+    $c = $script:C
+    if ($DiffResult.Diffs.Count -eq 0) {
+        Write-ColorText 'No differences found.' $c.Green
+        return
+    }
+    Write-ColorText "$([string][char]0x2500 * 3) Config Diff $([string][char]0x2500 * 45)" $c.BoldWhite
+    Write-Host "  $($c.Red)--- Removed: $($DiffResult.Lines1.Count) lines$($c.Reset)"
+    Write-Host "  $($c.Green)+++ Added: $($DiffResult.Lines2.Count) lines$($c.Reset)"
+    Write-Host ''
+    foreach ($d in $DiffResult.Diffs) {
+        if ($d.Type -eq 'Removed') { Write-Host "$($c.Red)- $($d.Line)$($c.Reset)" }
+        elseif ($d.Type -eq 'Added') { Write-Host "$($c.Green)+ $($d.Line)$($c.Reset)" }
+    }
 }
 
 function Format-ConfigSection {
@@ -2043,7 +1960,7 @@ function New-ReportSection {
 }
 
 function New-SummaryReport {
-    param([System.Collections.Generic.List[object]]$Events, [switch]$Detailed)
+    param([System.Collections.Generic.List[object]]$Events)
     $stats = Get-LogStatistics $Events
     $sections = [System.Collections.Generic.List[object]]::new()
 
@@ -2052,8 +1969,6 @@ function New-SummaryReport {
         'Time Range' = if ($stats.TimeRange.Min -ne [datetime]::MaxValue) {
             "$($stats.TimeRange.Min.ToString('yyyy-MM-dd HH:mm:ss')) - $($stats.TimeRange.Max.ToString('yyyy-MM-dd HH:mm:ss'))"
         } else { 'N/A' }
-        'Critical' = $stats.SeverityCounts.Critical
-        'High' = $stats.SeverityCounts.High
         'Sources' = ($stats.TopSources | ForEach-Object { $_.Key }) -join ', '
     })))
 
@@ -2072,42 +1987,58 @@ function New-SummaryReport {
 
     if (@($stats.TopEventIds).Count -gt 0) {
         $eidData = @($stats.TopEventIds | Select-Object -First 10 | ForEach-Object {
-            $eid = Get-SafeEventId $_.Key
-            $desc = if ($eid -and $script:Enrichment.EventId.ContainsKey($eid)) { $script:Enrichment.EventId[$eid] } else { '' }
+            $desc = if ($script:EventIdLookup.ContainsKey([int]$_.Key)) { $script:EventIdLookup[[int]$_.Key] } else { '' }
             @{ EventID = $_.Key; Count = $_.Value; Description = $desc }
         })
         $sections.Add((New-ReportSection 'Top Event IDs' 'Table' $eidData -Columns @('EventID','Count','Description')))
     }
 
-    if ($Detailed) {
-        $ipsecResult = Invoke-AnalyzeIpsecTunnel $Events
-        if ($ipsecResult.Tunnels.Count -gt 0) {
-            $tunData = @()
-            foreach ($tn in $ipsecResult.Tunnels.Keys) {
-                $t = $ipsecResult.Tunnels[$tn]
-                $tunData += @{ Tunnel = $tn; Status = $t.Status; Flaps = $t.FlapCount; LastFailure = $t.LastFailureReason }
-            }
-            $sections.Add((New-ReportSection 'IPsec Tunnel Status' 'Table' $tunData -Columns @('Tunnel','Status','Flaps','LastFailure')))
+    return New-ReportData 'Summary Report' $sections
+}
+
+function New-MorningBriefing {
+    param([System.Collections.Generic.List[object]]$Events)
+    $stats = Get-LogStatistics $Events
+    $sections = [System.Collections.Generic.List[object]]::new()
+
+    $sections.Add((New-ReportSection 'Overnight Summary' 'KeyValue' ([ordered]@{
+        'Total Events' = Format-Number $stats.Total
+        'Critical' = $stats.SeverityCounts.Critical
+        'High' = $stats.SeverityCounts.High
+        'Medium' = $stats.SeverityCounts.Medium
+    })))
+
+    # IPsec tunnel status
+    $ipsecResult = Invoke-AnalyzeIpsecTunnel $Events
+    if ($ipsecResult.Tunnels.Count -gt 0) {
+        $tunData = @()
+        foreach ($tn in $ipsecResult.Tunnels.Keys) {
+            $t = $ipsecResult.Tunnels[$tn]
+            $tunData += @{ Tunnel = $tn; Status = $t.Status; Flaps = $t.FlapCount; LastFailure = $t.LastFailureReason }
         }
-        $failedLogins = Invoke-AnalyzeFailedLogins $Events
-        if ($failedLogins.Count -gt 0) {
-            $flData = @($failedLogins | Select-Object -First 10 | ForEach-Object {
-                @{ User = $_.User; Count = $_.Count; UniqueIPs = $_.SourceIPs.Count; Sources = ($_.Sources -join ', ') }
-            })
-            $sections.Add((New-ReportSection 'Failed Logins (Top 10)' 'Table' $flData -Columns @('User','Count','UniqueIPs','Sources')))
-        }
-        $secEvents = @($Events | Where-Object { $_.Severity -in @('Critical','High') })
-        if ($secEvents.Count -gt 0) {
-            $secData = @($secEvents | Select-Object -First 20 | ForEach-Object {
-                $msgText = if ($_.Message) { $_.Message } else { '' }
-                @{ Time = $_.Timestamp.ToString('HH:mm:ss'); Severity = $_.Severity; Source = $_.Source; Message = $msgText.Substring(0, [Math]::Min(80, $msgText.Length)) }
-            })
-            $sections.Add((New-ReportSection 'Security Alerts' 'Table' $secData -Columns @('Time','Severity','Source','Message')))
-        }
+        $sections.Add((New-ReportSection 'IPsec Tunnel Status' 'Table' $tunData -Columns @('Tunnel','Status','Flaps','LastFailure')))
     }
 
-    $title = if ($Detailed) { 'Morning Briefing' } else { 'Summary Report' }
-    return New-ReportData $title $sections
+    # Failed logins
+    $failedLogins = Invoke-AnalyzeFailedLogins $Events
+    if ($failedLogins.Count -gt 0) {
+        $flData = @($failedLogins | Select-Object -First 10 | ForEach-Object {
+            @{ User = $_.User; Count = $_.Count; UniqueIPs = $_.SourceIPs.Count; Sources = ($_.Sources -join ', ') }
+        })
+        $sections.Add((New-ReportSection 'Failed Logins (Top 10)' 'Table' $flData -Columns @('User','Count','UniqueIPs','Sources')))
+    }
+
+    # Security alerts
+    $secEvents = @($Events | Where-Object { $_.Severity -in @('Critical','High') })
+    if ($secEvents.Count -gt 0) {
+        $secData = @($secEvents | Select-Object -First 20 | ForEach-Object {
+            $msgText = if ($_.Message) { $_.Message } else { '' }
+            @{ Time = $_.Timestamp.ToString('HH:mm:ss'); Severity = $_.Severity; Source = $_.Source; Message = $msgText.Substring(0, [Math]::Min(80, $msgText.Length)) }
+        })
+        $sections.Add((New-ReportSection 'Security Alerts' 'Table' $secData -Columns @('Time','Severity','Source','Message')))
+    }
+
+    return New-ReportData 'Morning Briefing' $sections
 }
 
 function New-AuditReport {
@@ -2121,7 +2052,7 @@ function New-AuditReport {
     })))
 
     # Privileged activity (Event 4672, 4648)
-    $privEvents = @($Events | Where-Object { $_.Extra['EventID'] -and (Get-SafeEventId $_.Extra['EventID']) -in @(4672,4648,4697,7045) })
+    $privEvents = @($Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4672,4648,4697,7045) })
     if ($privEvents.Count -gt 0) {
         $privData = @($privEvents | Select-Object -First 50 | ForEach-Object {
             $msgText = if ($_.Message) { $_.Message } else { '' }
@@ -2131,11 +2062,10 @@ function New-AuditReport {
     }
 
     # Account changes
-    $acctEvents = @($Events | Where-Object { $_.Extra['EventID'] -and (Get-SafeEventId $_.Extra['EventID']) -in @(4720,4722,4725,4726,4738,4740,4767) })
+    $acctEvents = @($Events | Where-Object { $_.Extra['EventID'] -and [int]$_.Extra['EventID'] -in @(4720,4722,4725,4726,4738,4740,4767) })
     if ($acctEvents.Count -gt 0) {
         $acctData = @($acctEvents | Select-Object -First 50 | ForEach-Object {
-            $eid = Get-SafeEventId $_.Extra['EventID']
-            $desc = if ($eid -and $script:Enrichment.EventId.ContainsKey($eid)) { $script:Enrichment.EventId[$eid] } else { '' }
+            $desc = if ($script:EventIdLookup.ContainsKey([int]$_.Extra['EventID'])) { $script:EventIdLookup[[int]$_.Extra['EventID']] } else { '' }
             @{ Time = $_.Timestamp.ToString('yyyy-MM-dd HH:mm'); EventID = $_.Extra['EventID']; Target = $_.Extra['TargetUserName']; Action = $desc }
         })
         $sections.Add((New-ReportSection 'Account Changes' 'Table' $acctData -Columns @('Time','EventID','Target','Action')))
@@ -2431,6 +2361,7 @@ function Start-InteractiveMode {
 
   COMMANDS:
     load <file>         Load additional log file
+    unload <file>       Remove a source
     sources             List loaded sources
     stats               Show statistics
     analyze <engine>    Run analysis (failed-logins, vpn-sessions, ipsec-tunnel)
@@ -2438,6 +2369,10 @@ function Start-InteractiveMode {
     report <type> --export <path>  Generate and export report
     fields              List available fields
     export <fmt> <path> Export (csv, json, html)
+    bookmark <N>        Bookmark event N
+    bookmarks           Show bookmarked events
+    copy                Copy filtered results to clipboard
+    highlight <pat>     Toggle highlight pattern
     clear               Clear active filter
     help                Show this help
     exit                Exit
@@ -2449,8 +2384,8 @@ function Start-InteractiveMode {
                 $fmt = Invoke-DetectLogFormat $loadPath
                 if (-not $fmt) { Write-Host "Unknown format: $loadPath"; continue }
                 $newEvents = Invoke-ParseLogFile -FilePath $loadPath -Format $fmt -SourceFile $loadPath
-                if ($null -ne $newEvents) {
-                    Add-EventsToList $currentEvents $newEvents
+                if ($null -ne $newEvents -and $newEvents.Count -gt 0) {
+                    $currentEvents.AddRange($newEvents)
                     $currentEvents = [System.Collections.Generic.List[object]]($currentEvents | Sort-Object Timestamp)
                     $filteredEvents = $currentEvents
                     $activeFilter = ''
@@ -2486,15 +2421,44 @@ function Start-InteractiveMode {
                 switch -Wildcard ($engine) {
                     'failed*' {
                         $results = Invoke-AnalyzeFailedLogins $filteredEvents
-                        Write-FailedLoginResults $results
+                        if ($results.Count -eq 0) { Write-Host 'No failed login events found.'; continue }
+                        Write-ColorText "$([string][char]0x2500 * 3) Failed Login Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                        Write-Host "  $($c.BoldWhite)$('User'.PadRight(30)) $('Count'.PadRight(8)) $('IPs'.PadRight(6)) $('First Seen'.PadRight(20)) $('Last Seen'.PadRight(20)) Sources$($c.Reset)"
+                        foreach ($r in $results) {
+                            $color = if ($r.Count -ge 10) { $c.Red } elseif ($r.Count -ge 5) { $c.Yellow } else { '' }
+                            $fs = if ($r.FirstSeen -ne [datetime]::MinValue) { $r.FirstSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                            $ls = if ($r.LastSeen -ne [datetime]::MinValue) { $r.LastSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                            Write-Host "  $color$($r.User.PadRight(30)) $($r.Count.ToString().PadRight(8)) $($r.SourceIPs.Count.ToString().PadRight(6)) $($fs.PadRight(20)) $($ls.PadRight(20)) $($r.Sources -join ', ')$($c.Reset)"
+                        }
                     }
                     'vpn*' {
                         $results = Invoke-AnalyzeVpnSessions $filteredEvents
-                        Write-VpnSessionResults $results
+                        Write-ColorText "$([string][char]0x2500 * 3) VPN Session Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                        foreach ($uk in $results.Sessions.Keys) {
+                            foreach ($s in $results.Sessions[$uk]) {
+                                $st = if ($s.StartTime -ne [datetime]::MinValue) { $s.StartTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                                $et = if ($s.EndTime) { $s.EndTime.ToString('yyyy-MM-dd HH:mm') } else { '(active)' }
+                                $dur = if ($s.Duration) { $s.Duration.ToString('d\.hh\:mm\:ss') } else { '' }
+                                Write-Host "  $($s.User.PadRight(25)) $($st.PadRight(18)) $($et.PadRight(18)) $($dur.PadRight(14)) $($s.RemoteIP)"
+                            }
+                        }
+                        if ($results.ImpossibleTravel.Count -gt 0) {
+                            Write-Host ''
+                            Write-ColorText "  IMPOSSIBLE TRAVEL FLAGS ($($results.ImpossibleTravel.Count)):" $c.Red
+                            foreach ($tf in $results.ImpossibleTravel) {
+                                Write-ColorText "    $($tf.User): $($tf.IP1) @ $($tf.Time1.ToString('HH:mm')) -> $($tf.IP2) @ $($tf.Time2.ToString('HH:mm')) ($($tf.MinutesBetween) min)" $c.Yellow
+                            }
+                        }
                     }
                     'ipsec*' {
                         $results = Invoke-AnalyzeIpsecTunnel $filteredEvents
-                        Write-IpsecTunnelResults $results
+                        Write-ColorText "$([string][char]0x2500 * 3) IPsec Tunnel Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                        Write-Host "  Total: $($results.Summary.TotalTunnels) | Up: $($results.Summary.UpCount) | Down: $($results.Summary.DownCount) | Flaps: $($results.Summary.FlapCount)"
+                        foreach ($tn in $results.Tunnels.Keys) {
+                            $t = $results.Tunnels[$tn]
+                            $color = if ($t.Status -eq 'Down') { $c.Red } elseif ($t.FlapCount -gt 0) { $c.Yellow } else { $c.Green }
+                            Write-Host "  $color$($t.TunnelName.PadRight(25)) $($t.Status.PadRight(8)) Flaps:$($t.FlapCount.ToString().PadRight(5)) $(if ($t.LastFailureReason) { $t.LastFailureReason } else { '-' })$($c.Reset)"
+                        }
                     }
                     default { Write-Host "Unknown analysis: $engine. Use: failed-logins, vpn-sessions, ipsec-tunnel" }
                 }
@@ -2505,7 +2469,7 @@ function Start-InteractiveMode {
                 if ($reportArgs -match '--export\s+(\S+)') { $exportPath = $Matches[1]; $reportArgs = ($reportArgs -replace '--export\s+\S+', '').Trim() }
                 $reportData = switch -Wildcard ($reportArgs) {
                     'summary*'    { New-SummaryReport $filteredEvents }
-                    'morning*'    { New-SummaryReport $filteredEvents -Detailed }
+                    'morning*'    { New-MorningBriefing $filteredEvents }
                     'audit*'      { New-AuditReport $filteredEvents }
                     'compliance*' { New-ComplianceReport $filteredEvents }
                     'timeline*'   { New-TimelineReport $filteredEvents }
@@ -2524,6 +2488,55 @@ function Start-InteractiveMode {
                 $eFmt = switch ($fmt.ToLower()) { 'csv' { 'Csv' } 'json' { 'Json' } 'html' { 'Html' } default { 'Csv' } }
                 $reportData = New-SummaryReport $filteredEvents
                 Export-Report -Path $path2 -Format $eFmt -ReportData $reportData -Events $filteredEvents
+            }
+            '^bookmark\s+(\d+)$' {
+                $bIdx = [int]$Matches[1] - 1
+                if ($bIdx -ge 0 -and $bIdx -lt $filteredEvents.Count) {
+                    $script:Bookmarks.Add($filteredEvents[$bIdx])
+                    Write-Host "Bookmarked event #$($Matches[1])"
+                } else { Write-Host "Invalid event number." }
+            }
+            '^bookmarks(\s+--(.+))?$' {
+                if ($Matches[2] -eq 'clear') { $script:Bookmarks.Clear(); Write-Host 'Cleared all bookmarks.'; continue }
+                if ($Matches[2] -match 'export\s+(.+)') {
+                    $bp = $Matches[1].Trim()
+                    $csv = Format-LogCsv -Events $script:Bookmarks
+                    [System.IO.File]::WriteAllLines($bp, @($csv))
+                    Write-Host "Exported $($script:Bookmarks.Count) bookmarks to $bp"
+                    continue
+                }
+                if ($Matches[2] -eq 'copy') {
+                    try {
+                        $text = ($script:Bookmarks | ForEach-Object { "$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))  $($_.Severity)  $($_.Source)  $($_.Message)" }) -join "`n"
+                        Set-Clipboard $text
+                        Write-Host "Copied $($script:Bookmarks.Count) bookmarks to clipboard."
+                    } catch { Write-Host "Clipboard not available." }
+                    continue
+                }
+                if ($script:Bookmarks.Count -eq 0) { Write-Host 'No bookmarks.'; continue }
+                Write-ColorText "$([string][char]0x2500 * 3) $($script:Bookmarks.Count) Bookmarked Events $([string][char]0x2500 * 30)" $c.BoldWhite
+                $bi = 0
+                foreach ($b in $script:Bookmarks) {
+                    $bi++
+                    $ts = if ($b.Timestamp -ne [datetime]::MinValue) { $b.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+                    Write-Host "  [$bi] $ts  $(Get-SeverityAbbrev $b.Severity)  $($b.Source)  $($b.Message.Substring(0, [Math]::Min(60, $b.Message.Length)))"
+                }
+            }
+            '^copy(\s+(\d+))?$' {
+                try {
+                    if ($Matches[2]) {
+                        $ci = [int]$Matches[2] - 1
+                        if ($ci -ge 0 -and $ci -lt $filteredEvents.Count) {
+                            $e = $filteredEvents[$ci]
+                            Set-Clipboard "$($e.Timestamp) | $($e.Severity) | $($e.Source) | $($e.Message)`n$($e.RawLine)"
+                            Write-Host "Copied event #$($Matches[2]) to clipboard."
+                        }
+                    } else {
+                        $text = ($filteredEvents | ForEach-Object { "$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))  $($_.Severity)  $($_.Source)  $($_.Message)" }) -join "`n"
+                        Set-Clipboard $text
+                        Write-Host "Copied $(Format-Number $filteredEvents.Count) events to clipboard."
+                    }
+                } catch { Write-Host 'Clipboard not available.' }
             }
             '^clear$' { $filteredEvents = $currentEvents; $activeFilter = ''; Write-Host 'Filter cleared.' }
             default {
@@ -2575,7 +2588,7 @@ function Start-TailMode {
             try {
                 [System.IO.File]::WriteAllText($tempFile, $rawLine)
                 $events = Invoke-ParseLogFile -FilePath $tempFile -Format $Format
-            } catch { Write-Verbose "Tail parse error: $_" } finally { Remove-Item $tempFile -ErrorAction SilentlyContinue }
+            } catch {} finally { Remove-Item $tempFile -ErrorAction SilentlyContinue }
 
             if (-not $events) { return }
             foreach ($e in $events) {
@@ -2611,6 +2624,16 @@ function Copy-ToClipboard {
     param([string]$Text)
     try { Set-Clipboard $Text; if (-not $script:QuietFlag) { Write-ColorText 'Copied to clipboard.' $script:C.Green } }
     catch { Write-Warning 'Clipboard not available (Set-Clipboard requires Windows PS 5.1+).' }
+}
+
+function Send-ReportEmail {
+    param([string]$To, [string]$Server, [string]$Subject, [string]$Body)
+    $from = "logparser@$($env:COMPUTERNAME)"
+    if ($PSVersionTable.PSVersion.Major -ge 7) { Write-Warning 'Send-MailMessage is obsolete in PS 7+. Attempting anyway...' }
+    try {
+        Send-MailMessage -From $from -To $To -Subject $Subject -Body $Body -BodyAsHtml -SmtpServer $Server
+        if (-not $script:QuietFlag) { Write-ColorText "Email sent to $To" $script:C.Green }
+    } catch { Write-Warning "Email failed: $_" }
 }
 
 function Open-ExportFile {
@@ -2693,7 +2716,7 @@ try {
     if ($ListReports) {
         Write-Host 'Available reports:'
         Write-Host '  Summary      Parse stats, severity distribution, top talkers'
-        Write-Host '  Morning      Detailed summary with tunnel status, failed logins, alerts'
+        Write-Host '  Morning      Multi-source overnight summary'
         Write-Host '  Audit        Privileged activity, failed auth, config changes'
         Write-Host '  Compliance   FFIEC-mapped control evidence'
         Write-Host '  Timeline     Chronological event timeline'
@@ -2719,7 +2742,7 @@ try {
         $script:TempDirs.Add($tempFile)
         [System.IO.File]::WriteAllLines($tempFile, $script:PipedLines.ToArray())
         $events = Invoke-ParseLogFile -FilePath $tempFile -Format $Format -SourceFile '(piped)'
-        if ($null -ne $events) { Add-EventsToList $allEvents $events }
+        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
         $loadedFiles.Add('(piped)')
         $loadedFormats.Add($Format)
     }
@@ -2748,7 +2771,7 @@ try {
                             Write-Progress -Activity 'Parsing' -Status "$($af.FileName) ($($af.Format))" -PercentComplete 0
                         }
                         $events = Invoke-ParseLogFile -FilePath $af.Path -Format $af.Format -SourceFile $af.FileName
-                        if ($null -ne $events) { Add-EventsToList $allEvents $events }
+                        if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
                         $loadedFiles.Add($af.FileName)
                         if ($af.Format -notin $loadedFormats) { $loadedFormats.Add($af.Format) }
                     }
@@ -2763,11 +2786,11 @@ try {
 
                 # Store raw lines for -Context support
                 if ($Context -gt 0) {
-                    try { $script:RawFileLines[$fileName] = [System.IO.File]::ReadAllLines($filePath) } catch { Write-Verbose "Could not read raw lines: $_" }
+                    try { $script:RawFileLines[$fileName] = [System.IO.File]::ReadAllLines($filePath) } catch {}
                 }
 
                 $events = Invoke-ParseLogFile -FilePath $filePath -Format $fileFormat -SourceFile $filePath
-                if ($null -ne $events) { Add-EventsToList $allEvents $events }
+                if ($null -ne $events -and $events.Count -gt 0) { $allEvents.AddRange($events) }
                 $loadedFiles.Add($fileName)
                 if ($fileFormat -notin $loadedFormats) { $loadedFormats.Add($fileFormat) }
             }
@@ -2787,6 +2810,30 @@ try {
     $allEvents = [System.Collections.Generic.List[object]]::new()
     if ($null -ne $sorted) { $allEvents.AddRange(@($sorted)) }
 
+    # Config diff mode
+    if ($DiffPath) {
+        $diffFile = $DiffPath[0]
+        $diffResult = Compare-Configs -File1 $Path[0] -File2 $diffFile -SectionFilter $Section
+        Format-ConfigDiff $diffResult
+        if ($ExportPath) {
+            $reportData = New-ReportData 'Config Diff' ([System.Collections.Generic.List[object]]::new())
+            $html = ConvertTo-HtmlReport -ReportData $reportData -Events $allEvents
+            # Inject diff HTML
+            $diffHtml = '<h2>DIFFERENCES</h2><div class="code">'
+            foreach ($d in $diffResult.Diffs) {
+                $cls = if ($d.Type -eq 'Added') { 'diff-add' } else { 'diff-del' }
+                $prefix = if ($d.Type -eq 'Added') { '+' } else { '-' }
+                $diffHtml += "<div class='$cls'>$prefix $([System.Net.WebUtility]::HtmlEncode($d.Line))</div>"
+            }
+            $diffHtml += '</div>'
+            $html = $html -replace '</body>', "$diffHtml</body>"
+            [System.IO.File]::WriteAllText($ExportPath, $html)
+            Write-ColorText "Exported diff to $ExportPath" $script:C.Green
+            if ($Open) { Open-ExportFile $ExportPath }
+        }
+        return
+    }
+
     # Config section extraction mode
     if ($Section) {
         $sectionLines = Get-ConfigSection $Path[0] $Section
@@ -2802,7 +2849,6 @@ try {
     # Tail mode
     if ($Tail) {
         $tailFormat = if ($Format) { $Format } else { Invoke-DetectLogFormat $Path[0] }
-        if (-not $tailFormat) { Write-Warning "Could not detect format for $($Path[0]). Use -Format."; return }
         Start-TailMode -FilePath $Path[0] -Format $tailFormat -FilterQuery $Filter -HighlightPattern $Highlight -InitialLines $TailLines
         return
     }
@@ -2826,12 +2872,7 @@ try {
     $filtered = $allEvents
     if ($Filter) { $filtered = Invoke-FilterEvents -Events $filtered -Query $Filter }
     if ($Regex) {
-        try {
-            $regexObj = [regex]::new($Regex, 'IgnoreCase, Compiled')
-        } catch {
-            Write-Warning "Invalid regex pattern '$Regex': $($_.Exception.Message)"
-            return
-        }
+        $regexObj = [regex]::new($Regex, 'IgnoreCase, Compiled')
         $regexFiltered = [System.Collections.Generic.List[object]]::new()
         foreach ($e in $filtered) {
             $raw = if ($e.RawLine) { $e.RawLine } else { '' }
@@ -2843,9 +2884,6 @@ try {
     # Surround mode
     if ($Surround -gt 0 -and $filtered.Count -gt 0) {
         $matchTimestamps = @($filtered | Where-Object { $null -ne $_ -and $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp })
-        if ($matchTimestamps.Count -eq 0) {
-            Write-Warning "-Surround requires events with parseable timestamps."
-        }
         $surroundResult = [System.Collections.Generic.List[object]]::new()
         $surroundSpan = [timespan]::FromSeconds($Surround)
         foreach ($e in $allEvents) {
@@ -2864,10 +2902,58 @@ try {
     # Run analysis
     if ($Analyze) {
         switch ($Analyze) {
-            'FailedLogins' { Write-FailedLoginResults (Invoke-AnalyzeFailedLogins $filtered) }
-            'VpnSessions'  { Write-VpnSessionResults (Invoke-AnalyzeVpnSessions $filtered) }
-            'IpsecTunnel'  { Write-IpsecTunnelResults (Invoke-AnalyzeIpsecTunnel $filtered) }
-            'Summary'      { Write-LogStats -Stats (Get-LogStatistics $filtered) -SourceFiles @($loadedFiles) -Formats @($loadedFormats) -ParseTime $parseTime }
+            'FailedLogins' {
+                $results = Invoke-AnalyzeFailedLogins $filtered
+                if ($results.Count -eq 0) { Write-Host 'No failed login events found.' }
+                else {
+                    $c = $script:C
+                    Write-ColorText "$([string][char]0x2500 * 3) Failed Login Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                    Write-Host "  $($c.BoldWhite)$('User'.PadRight(30)) $('Count'.PadRight(8)) $('Unique IPs'.PadRight(12)) $('First Seen'.PadRight(20)) $('Last Seen'.PadRight(20)) Sources$($c.Reset)"
+                    Write-ColorText "  $([string][char]0x2500 * 110)" $c.Dim
+                    foreach ($r in $results) {
+                        $color = if ($r.Count -ge 10) { $c.Red } elseif ($r.Count -ge 5) { $c.Yellow } else { '' }
+                        $fs = if ($r.FirstSeen -ne [datetime]::MinValue) { $r.FirstSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                        $ls = if ($r.LastSeen -ne [datetime]::MinValue) { $r.LastSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                        Write-Host "  $color$($r.User.PadRight(30)) $(($r.Count.ToString()).PadRight(8)) $(($r.SourceIPs.Count.ToString()).PadRight(12)) $($fs.PadRight(20)) $($ls.PadRight(20)) $($r.Sources -join ', ')$($c.Reset)"
+                    }
+                }
+            }
+            'VpnSessions' {
+                $results = Invoke-AnalyzeVpnSessions $filtered
+                $c = $script:C
+                Write-ColorText "$([string][char]0x2500 * 3) VPN Session Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                Write-Host "  $($c.BoldWhite)$('User'.PadRight(25)) $('Start'.PadRight(20)) $('End'.PadRight(20)) $('Duration'.PadRight(15)) Remote IP$($c.Reset)"
+                foreach ($uk in $results.Sessions.Keys) {
+                    foreach ($s in $results.Sessions[$uk]) {
+                        $st = if ($s.StartTime -ne [datetime]::MinValue) { $s.StartTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                        $et = if ($s.EndTime) { $s.EndTime.ToString('yyyy-MM-dd HH:mm') } else { '(active)' }
+                        $dur = if ($s.Duration) { $s.Duration.ToString('d\.hh\:mm\:ss') } else { '' }
+                        Write-Host "  $($s.User.PadRight(25)) $($st.PadRight(20)) $($et.PadRight(20)) $($dur.PadRight(15)) $($s.RemoteIP)"
+                    }
+                }
+                if ($results.ImpossibleTravel.Count -gt 0) {
+                    Write-ColorText "`n  IMPOSSIBLE TRAVEL ($($results.ImpossibleTravel.Count)):" $c.Red
+                    foreach ($tf in $results.ImpossibleTravel) {
+                        Write-ColorText "    $($tf.User): $($tf.IP1) @ $($tf.Time1.ToString('HH:mm')) -> $($tf.IP2) @ $($tf.Time2.ToString('HH:mm')) ($($tf.MinutesBetween) min)" $c.Yellow
+                    }
+                }
+            }
+            'IpsecTunnel' {
+                $results = Invoke-AnalyzeIpsecTunnel $filtered
+                $c = $script:C
+                Write-ColorText "$([string][char]0x2500 * 3) IPsec Tunnel Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
+                Write-Host "  Total: $($results.Summary.TotalTunnels) | Up: $($results.Summary.UpCount) | Down: $($results.Summary.DownCount) | Flaps: $($results.Summary.FlapCount)"
+                Write-Host "  $($c.BoldWhite)$('Tunnel'.PadRight(25)) $('Status'.PadRight(10)) $('Flaps'.PadRight(8)) Last Failure$($c.Reset)"
+                foreach ($tn in $results.Tunnels.Keys) {
+                    $t = $results.Tunnels[$tn]
+                    $color = if ($t.Status -eq 'Down') { $c.Red } elseif ($t.FlapCount -gt 0) { $c.Yellow } else { $c.Green }
+                    Write-Host "  $color$($t.TunnelName.PadRight(25)) $($t.Status.PadRight(10)) $($t.FlapCount.ToString().PadRight(8)) $(if ($t.LastFailureReason) { $t.LastFailureReason } else { '-' })$($c.Reset)"
+                }
+            }
+            'Summary' {
+                $stats = Get-LogStatistics $filtered
+                Write-LogStats -Stats $stats -SourceFiles @($loadedFiles) -Formats @($loadedFormats) -ParseTime $parseTime
+            }
         }
         Write-Host ''
     }
@@ -2877,7 +2963,7 @@ try {
     if ($Report) {
         $reportData = switch ($Report) {
             'Summary'    { New-SummaryReport $filtered }
-            'Morning'    { New-SummaryReport $filtered -Detailed }
+            'Morning'    { New-MorningBriefing $filtered }
             'Audit'      { New-AuditReport $filtered }
             'Compliance' { New-ComplianceReport $filtered }
             'Timeline'   { New-TimelineReport $filtered }
@@ -2904,10 +2990,10 @@ try {
             switch ($OutputFormat) {
                 'Table' { Format-LogTable -Events $filtered -FieldList $fieldList -HighlightPattern $Highlight -Max $displayMax }
                 'Grid'  { Format-LogGrid -Events $filtered -FieldList $fieldList -HighlightPattern $Highlight -Max $displayMax }
-                'List'  { Format-LogList -Events $filtered -FieldList $fieldList -HighlightPattern $Highlight -Max $displayMax }
-                'Raw'   { Format-LogRaw -Events $filtered -FieldList $fieldList -Max $displayMax }
-                'Json'  { Format-LogJson -Events $filtered -FieldList $fieldList -Max $displayMax }
-                'Csv'   { Format-LogCsv -Events $filtered -FieldList $fieldList -Max $displayMax }
+                'List'  { Format-LogList -Events $filtered -HighlightPattern $Highlight -Max $displayMax }
+                'Raw'   { Format-LogRaw -Events $filtered -Max $displayMax }
+                'Json'  { Format-LogJson -Events $filtered -Max $displayMax }
+                'Csv'   { Format-LogCsv -Events $filtered -Max $displayMax }
             }
         }
     }
@@ -2917,6 +3003,14 @@ try {
         $rd = if ($reportData) { $reportData } else { New-SummaryReport $filtered }
         Export-Report -Path $ExportPath -Format $ExportFormat -ReportData $rd -Events $filtered
         if ($Open) { Open-ExportFile $ExportPath }
+    }
+
+    # Email
+    if ($EmailTo -and $SmtpServer) {
+        $rd = if ($reportData) { $reportData } else { New-SummaryReport $filtered }
+        $html = ConvertTo-HtmlReport -ReportData $rd -Events $filtered
+        $subject = "Invoke-LogParser: $($rd.Title) - $(Get-Date -Format 'yyyy-MM-dd')"
+        Send-ReportEmail -To $EmailTo -Server $SmtpServer -Subject $subject -Body $html
     }
 
     # Clipboard

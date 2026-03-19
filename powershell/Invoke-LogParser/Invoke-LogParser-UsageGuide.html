@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoke-LogParser v7.0 — Usage Guide</title>
+<style>
+  @page {
+    size: letter;
+    margin: 0.75in 0.8in;
+    @bottom-center { content: counter(page); font-size: 9pt; color: #666; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+    max-width: 7in;
+    margin: 0 auto;
+  }
+
+  /* Cover / title block */
+  .cover {
+    text-align: center;
+    padding: 1.2in 0 0.6in;
+    border-bottom: 3px solid #0078d4;
+    margin-bottom: 0.4in;
+    page-break-after: always;
+  }
+  .cover h1 { font-size: 28pt; margin: 0 0 0.08in; color: #0078d4; }
+  .cover .subtitle { font-size: 13pt; color: #444; margin: 0 0 0.35in; }
+  .cover .meta { font-size: 10pt; color: #666; }
+
+  h2 {
+    font-size: 16pt;
+    color: #0078d4;
+    border-bottom: 2px solid #0078d4;
+    padding-bottom: 3pt;
+    margin-top: 0.35in;
+    margin-bottom: 0.12in;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt;
+    color: #333;
+    margin-top: 0.2in;
+    margin-bottom: 0.06in;
+    page-break-after: avoid;
+  }
+  p, li { margin: 0.04in 0; }
+  ul, ol { padding-left: 0.25in; margin: 0.06in 0; }
+  li { margin-bottom: 0.03in; }
+
+  code {
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f0f4f8;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #1a1a1a;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    border-left: 3px solid #0078d4;
+    border-radius: 4px;
+    padding: 8pt 10pt;
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    margin: 0.06in 0 0.12in;
+    page-break-inside: avoid;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .comment { color: #6a737d; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.08in 0 0.12in;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 5pt 8pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f0f4f8; font-weight: 600; color: #1a1a1a; }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  .toc { margin: 0.2in 0 0.3in; }
+  .toc a { color: #0078d4; text-decoration: none; }
+  .toc li { margin-bottom: 0.03in; }
+
+  .note {
+    background: #fff8e1;
+    border-left: 3px solid #f9a825;
+    padding: 6pt 10pt;
+    margin: 0.08in 0;
+    font-size: 9.5pt;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .page-break { page-break-before: always; }
+
+  strong { color: #1a1a1a; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <h1>Invoke-LogParser</h1>
+  <div class="subtitle">Version 7.0 &mdash; Usage Guide</div>
+  <p class="meta">
+    Single-file CLI tool for parsing, filtering, analyzing, and reporting<br>
+    on infrastructure log files.<br><br>
+    PowerShell 5.1+ &bull; Zero dependencies &bull; Cross-platform
+  </p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<h2>Table of Contents</h2>
+<ol class="toc">
+  <li><a href="#quickstart">Quick Start</a></li>
+  <li><a href="#requirements">Requirements</a></li>
+  <li><a href="#formats">Supported Formats</a></li>
+  <li><a href="#output">Output Formats</a></li>
+  <li><a href="#query">Query Syntax</a></li>
+  <li><a href="#analysis">Analysis Engines</a></li>
+  <li><a href="#reports">Reports</a></li>
+  <li><a href="#config">FortiGate Config Tools</a></li>
+  <li><a href="#interactive">Interactive Mode</a></li>
+  <li><a href="#tail">Live Tail Mode</a></li>
+  <li><a href="#enrichment">Enrichment Data</a></li>
+  <li><a href="#parameters">Parameter Reference</a></li>
+  <li><a href="#architecture">Architecture</a></li>
+  <li><a href="#examples">Workflow Examples</a></li>
+</ol>
+
+<!-- 1. QUICK START -->
+<h2 id="quickstart">1. Quick Start</h2>
+
+<p>Drop <code>Invoke-LogParser.ps1</code> anywhere on your system. No installation or modules required.</p>
+
+<pre><code><span class="comment"># Parse and display with auto-detection</span>
+.\Invoke-LogParser.ps1 -Path firewall.log
+
+<span class="comment"># Filter denied traffic, compact grid</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Filter "action:deny" -OutputFormat Grid
+
+<span class="comment"># Quick digest of all logs in a directory</span>
+.\Invoke-LogParser.ps1 -Path *.log -StatsOnly
+
+<span class="comment"># Multi-file parsing across sources</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,switch.log,dc01-security.xml
+
+<span class="comment"># Extract and parse a zip archive</span>
+.\Invoke-LogParser.ps1 -Path logs-export.zip
+
+<span class="comment"># Analyze failed logins across sources</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,dc01-security.xml -Analyze FailedLogins
+
+<span class="comment"># Generate an HTML report and open it</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Report Summary -ExportPath report.html -ExportFormat Html -Open</code></pre>
+
+<!-- 2. REQUIREMENTS -->
+<h2 id="requirements">2. Requirements</h2>
+
+<ul>
+  <li><strong>PowerShell 5.1+</strong> &mdash; Windows PowerShell or pwsh 7+</li>
+  <li><strong>No external modules</strong> &mdash; pure PowerShell + .NET Framework</li>
+  <li><strong>Single file</strong> &mdash; just <code>Invoke-LogParser.ps1</code>, no helper files needed</li>
+</ul>
+
+<div class="note">
+  Binary <code>.evtx</code> files require Windows with <code>Get-WinEvent</code>. For cross-platform use, export Windows Event Logs to XML first.
+</div>
+
+<!-- 3. SUPPORTED FORMATS -->
+<h2 id="formats">3. Supported Formats</h2>
+
+<table>
+  <tr><th>Parser</th><th>Description</th><th>Auto-Detect</th></tr>
+  <tr>
+    <td><code>FortiGateConf</code></td>
+    <td>FortiGate configuration file (<code>.conf</code>)</td>
+    <td><code>#config-version=FG</code> or <code>config system global</code></td>
+  </tr>
+  <tr>
+    <td><code>FortiGateKV</code></td>
+    <td>Fortinet key=value syslog (FortiGate, FortiClient EMS, FortiAP)</td>
+    <td><code>logid=</code> + <code>type=</code> + <code>devname=</code>/<code>devid=</code></td>
+  </tr>
+  <tr>
+    <td><code>FortiClientLocal</code></td>
+    <td>FortiClient local log (tab-delimited debug + structured events)</td>
+    <td>Tab-delimited timestamp, <code>fctver=</code>, <code>devid=FCT</code>, or legacy bracket format</td>
+  </tr>
+  <tr>
+    <td><code>FortiSwitchEvent</code></td>
+    <td>FortiSwitch event log (port, STP, MAC, 802.1X)</td>
+    <td><code>devid=FS</code> or <code>devtype="FortiSwitch"</code></td>
+  </tr>
+  <tr>
+    <td><code>WindowsEvtx</code></td>
+    <td>Windows Event Log (binary <code>.evtx</code> or XML export)</td>
+    <td><code>.evtx</code> extension or <code>&lt;Event xmlns=</code></td>
+  </tr>
+</table>
+
+<p>Compressed <code>.zip</code> archives are automatically extracted and parsed. Format is auto-detected from file content &mdash; use <code>-Format</code> to override.</p>
+
+<pre><code>.\Invoke-LogParser.ps1 -ListParsers    <span class="comment"># show all parsers</span></code></pre>
+
+<h3>FortiClient Local Log Format</h3>
+
+<p>FortiClient local logs (exported from <code>C:\Program Files\Fortinet\FortiClient\logs\</code>) contain two interleaved line types:</p>
+
+<ul>
+  <li><strong>Debug lines</strong> &mdash; <code>TIMESTAMP&lt;TAB&gt;LEVEL&lt;TAB&gt;CATEGORY&lt;TAB&gt;MESSAGE</code> with internal diagnostic messages. Parsed with <code>LogType=Debug</code>.</li>
+  <li><strong>Structured events</strong> &mdash; same tab-delimited layout, but the message field contains a full Fortinet key=value payload (<code>date=... time=... type=... msg="..."</code>). All key=value pairs are expanded into properties. Parsed with <code>LogType=Event</code>.</li>
+</ul>
+
+<pre><code><span class="comment"># Skip debug noise, show only structured events</span>
+.\Invoke-LogParser.ps1 -Path forticlient.log -Filter "LogType:Event"
+
+<span class="comment"># Find compliance failures</span>
+.\Invoke-LogParser.ps1 -Path forticlient.log -Filter "LogType:Event AND eventtype:compliance"</code></pre>
+
+<p>The legacy bracket format (<code>[YYYY-MM-DD HH:MM:SS] [level] [module] message</code>) from older FortiClient versions is also supported.</p>
+
+<!-- 4. OUTPUT FORMATS -->
+<h2 id="output">4. Output Formats</h2>
+
+<table>
+  <tr><th>Format</th><th>Flag</th><th>Description</th></tr>
+  <tr><td><strong>Table</strong></td><td><code>-OutputFormat Table</code></td><td>Box-drawing bordered table (default)</td></tr>
+  <tr><td><strong>Grid</strong></td><td><code>-OutputFormat Grid</code></td><td>Compact space-padded columns</td></tr>
+  <tr><td><strong>List</strong></td><td><code>-OutputFormat List</code></td><td>Detailed field-per-line for each event</td></tr>
+  <tr><td><strong>Raw</strong></td><td><code>-OutputFormat Raw</code></td><td>PSObjects for pipeline (<code>Where-Object</code>, <code>Export-Csv</code>, etc.)</td></tr>
+  <tr><td><strong>Json</strong></td><td><code>-OutputFormat Json</code></td><td>JSON Lines (one object per line)</td></tr>
+  <tr><td><strong>Csv</strong></td><td><code>-OutputFormat Csv</code></td><td>CSV with auto-discovered headers</td></tr>
+</table>
+
+<p>All output formats respect the <code>-Fields</code> parameter to select specific columns. When output is piped, color is auto-disabled.</p>
+
+<pre><code><span class="comment"># Select specific fields across any format</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Fields "Timestamp,srcip,dstip,action" -OutputFormat Csv
+
+<span class="comment"># Pipeline integration with Raw output</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -OutputFormat Raw | Where-Object { $_.Extra.dstport -eq '3389' }</code></pre>
+
+<!-- 5. QUERY SYNTAX -->
+<div class="page-break"></div>
+<h2 id="query">5. Query Syntax</h2>
+
+<p>Used with <code>-Filter</code> and in interactive mode. Supports hyphenated field names (e.g., <code>ips-sensor:default</code>, <code>utm-status:enable</code>).</p>
+
+<h3>Field Matching</h3>
+<table>
+  <tr><th>Syntax</th><th>Description</th><th>Example</th></tr>
+  <tr><td><code>field:value</code></td><td>Exact match (case-insensitive)</td><td><code>action:deny</code></td></tr>
+  <tr><td><code>field:val*</code></td><td>Wildcard match</td><td><code>srcip:10.12.*</code></td></tr>
+  <tr><td><code>field:&gt;N</code></td><td>Numeric greater-than</td><td><code>dstport:&gt;1024</code></td></tr>
+  <tr><td><code>field:&lt;N</code></td><td>Numeric less-than</td><td><code>sentbyte:&lt;100</code></td></tr>
+  <tr><td><code>NOT field:value</code></td><td>Negation</td><td><code>NOT action:accept</code></td></tr>
+  <tr><td><code>expr AND expr</code></td><td>Boolean AND</td><td><code>action:deny AND srcip:10.*</code></td></tr>
+  <tr><td><code>expr OR expr</code></td><td>Boolean OR</td><td><code>severity:High OR severity:Critical</code></td></tr>
+</table>
+
+<h3>Pipeline Operators</h3>
+<p>Append pipeline operators after a filter using <code>|</code>:</p>
+
+<table>
+  <tr><th>Operator</th><th>Description</th><th>Example</th></tr>
+  <tr><td><code>| count</code></td><td>Count matching results</td><td><code>action:deny | count</code></td></tr>
+  <tr><td><code>| count by F</code></td><td>Group and count by field</td><td><code>action:deny | count by dstport</code></td></tr>
+  <tr><td><code>| top N</code></td><td>Top N results</td><td><code>action:deny | top 10</code></td></tr>
+  <tr><td><code>| sort F [asc|desc]</code></td><td>Sort by field</td><td><code>severity:* | sort Timestamp desc</code></td></tr>
+  <tr><td><code>| head N</code></td><td>First N events</td><td><code>| head 50</code></td></tr>
+  <tr><td><code>| tail N</code></td><td>Last N events</td><td><code>| tail 20</code></td></tr>
+  <tr><td><code>| timeline Interval</code></td><td>Time-bucketed histogram</td><td><code>| timeline 1h</code></td></tr>
+  <tr><td><code>| table F1,F2,...</code></td><td>Select display columns</td><td><code>| table srcip,dstip,action</code></td></tr>
+</table>
+
+<!-- 6. ANALYSIS ENGINES -->
+<h2 id="analysis">6. Analysis Engines</h2>
+
+<pre><code>.\Invoke-LogParser.ps1 -Path &lt;files&gt; -Analyze &lt;engine&gt;
+.\Invoke-LogParser.ps1 -ListAnalyzers   <span class="comment"># show all engines</span></code></pre>
+
+<table>
+  <tr><th>Engine</th><th>Description</th></tr>
+  <tr>
+    <td><code>FailedLogins</code></td>
+    <td>Cross-source failed authentication aggregation. Detects Windows Event IDs 4625, 4771, 6273; NPS Access-Reject; FortiGate user auth denials. Aggregates by user with count, unique source IPs, first/last seen, and source type.</td>
+  </tr>
+  <tr>
+    <td><code>VpnSessions</code></td>
+    <td>VPN session lifecycle tracking. Maps tunnel-up/down, ssl-new-con, login/logout events into session objects with duration. Detects impossible travel: same user from different /16 public IP ranges within 30 minutes. Private (RFC 1918) and IPv6 addresses are excluded from travel checks.</td>
+  </tr>
+  <tr>
+    <td><code>IpsecTunnel</code></td>
+    <td>Per-tunnel health metrics. Tracks up/down events, negotiation success/failure, DPD timeouts. Calculates flap count (state changes within 5 minutes) and uptime percentage.</td>
+  </tr>
+  <tr>
+    <td><code>Summary</code></td>
+    <td>General statistics: total events, severity distribution, top source IPs, top event IDs, events per hour.</td>
+  </tr>
+</table>
+
+<pre><code><span class="comment"># Analyze failed logins across firewall and domain controller logs</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,dc01-security.xml -Analyze FailedLogins
+
+<span class="comment"># Check VPN session health and impossible travel</span>
+.\Invoke-LogParser.ps1 -Path vpn.log -Analyze VpnSessions
+
+<span class="comment"># Monitor IPsec tunnel stability</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Filter "subtype:ipsecvpn" -Analyze IpsecTunnel</code></pre>
+
+<!-- 7. REPORTS -->
+<h2 id="reports">7. Reports</h2>
+
+<pre><code>.\Invoke-LogParser.ps1 -Path &lt;files&gt; -Report &lt;type&gt; [-ExportPath report.html -ExportFormat Html]
+.\Invoke-LogParser.ps1 -ListReports     <span class="comment"># show all report types</span></code></pre>
+
+<table>
+  <tr><th>Report</th><th>Description</th></tr>
+  <tr><td><code>Summary</code></td><td>Parse stats, severity distribution bar chart, top source IPs, top event IDs with descriptions.</td></tr>
+  <tr><td><code>Morning</code></td><td>Detailed summary including IPsec tunnel status, top 10 failed logins, and critical/high security alerts. Designed for daily review.</td></tr>
+  <tr><td><code>Audit</code></td><td>Privileged activity (Events 4672, 4648, 4697, 7045), account changes (4720&ndash;4767), and failed authentication summary with time spans.</td></tr>
+  <tr><td><code>Compliance</code></td><td>FFIEC/NCUA control mapping (AC-1, AC-2, AU-1, CM-1, IA-1, SC-1, IR-1) with evidence counts and Sufficient/Partial/Insufficient coverage ratings.</td></tr>
+  <tr><td><code>Timeline</code></td><td>Chronological cross-source event timeline (first 200 events) with timestamp, severity, source, and message.</td></tr>
+</table>
+
+<p>Reports render to console by default. Export to HTML with <code>-ExportPath</code> for a self-contained, print-friendly document. CSV and JSON export are also supported.</p>
+
+<pre><code><span class="comment"># Morning briefing exported to HTML</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,dc01.xml -Report Morning -ExportPath morning.html -ExportFormat Html -Open
+
+<span class="comment"># Compliance report for auditors</span>
+.\Invoke-LogParser.ps1 -Path dc01.xml -Report Compliance -ExportPath compliance.html -ExportFormat Html</code></pre>
+
+<!-- 8. CONFIG TOOLS -->
+<h2 id="config">8. FortiGate Config Tools</h2>
+
+<h3>Section Extraction</h3>
+<pre><code><span class="comment"># Extract a config section</span>
+.\Invoke-LogParser.ps1 -Path config.conf -Section "firewall policy"
+
+<span class="comment"># Extract with wildcard</span>
+.\Invoke-LogParser.ps1 -Path config.conf -Section "firewall*"
+
+<span class="comment"># Extract system interfaces</span>
+.\Invoke-LogParser.ps1 -Path config.conf -Section "system interface"</code></pre>
+
+<h3>Security Flagging</h3>
+<p>When parsing FortiGate configuration files, the config parser automatically flags security issues on each policy/setting:</p>
+
+<table>
+  <tr><th>Flag</th><th>Condition</th></tr>
+  <tr><td><code>INSECURE-MGMT</code></td><td>HTTP or Telnet enabled on an interface's <code>allowaccess</code></td></tr>
+  <tr><td><code>NO-IPS</code></td><td>Accept policy with no IPS sensor assigned</td></tr>
+  <tr><td><code>NO-UTM</code></td><td>Accept policy with no UTM profiles (AV, web filter, app control, etc.)</td></tr>
+  <tr><td><code>NO-LOGGING</code></td><td>Policy with logging disabled or defaulting to off</td></tr>
+  <tr><td><code>PERMISSIVE</code></td><td>Policy with <code>srcaddr=all</code>, <code>dstaddr=all</code>, <code>service=ALL</code></td></tr>
+  <tr><td><code>WEAK-PASSWD-POLICY</code></td><td>Password policy disabled or minimum length &lt; 8</td></tr>
+  <tr><td><code>WEAK-SSL-INSPECT</code></td><td>Certificate-inspection mode (no deep inspection)</td></tr>
+</table>
+
+<div class="note">
+  For config diffing, use the dedicated <code>Compare-FortiGateConfigs.ps1</code> script in this repo, which provides LCS-based section-by-section comparison.
+</div>
+
+<!-- 9. INTERACTIVE MODE -->
+<h2 id="interactive">9. Interactive Mode</h2>
+
+<p>Launch with <code>-Interactive</code> to enter a REPL for exploratory log analysis.
+The prompt shows active filter, event count, pin status, and highlight indicator.</p>
+
+<pre><code>.\Invoke-LogParser.ps1 -Path firewall.log -Interactive
+
+Invoke-LogParser v7.0
+Loaded 14,892 events from 1 file(s)
+Type 'help' for commands.
+
+ILP [14892]> action:deny AND severity:High
+87 events
+ILP (action:deny AND severity:High) [87]> whois srcip
+ILP (...) [87]> correlate srcip
+Correlated on 3 unique srcip values: 1,247 events
+ILP (correlate:srcip) [1247]> columns srcip,dstip,action,Message
+ILP (correlate:srcip) [1247]> exclude severity:Info
+ILP (exclude severity:Info) [892]> show 1
+ILP> report summary --export report.html
+ILP> exit</code></pre>
+
+<h3>REPL Commands</h3>
+<table>
+  <tr><td colspan="2"><strong>Inspection</strong></td></tr>
+  <tr><td><code>show &lt;N&gt;</code></td><td>Full event detail for event #N</td></tr>
+  <tr><td><code>raw &lt;N&gt;</code></td><td>Raw log line for event #N</td></tr>
+  <tr><td><code>context &lt;N&gt; [lines]</code></td><td>Surrounding lines from source file</td></tr>
+  <tr><td><code>diff &lt;N&gt; &lt;M&gt;</code></td><td>Compare two events side-by-side</td></tr>
+  <tr><td><code>next</code> / <code>prev</code></td><td>Page through results</td></tr>
+  <tr><td><code>goto &lt;N&gt;</code></td><td>Jump to page containing event #N</td></tr>
+  <tr><td colspan="2"><strong>Investigation</strong></td></tr>
+  <tr><td><code>whois &lt;field&gt;</code></td><td>Field value summary with bar chart (alias: <code>inspect</code>)</td></tr>
+  <tr><td><code>search &lt;text&gt;</code></td><td>Free-text search across all fields</td></tr>
+  <tr><td><code>correlate &lt;field&gt;</code></td><td>Pivot: find all events sharing field values with current results</td></tr>
+  <tr><td><code>exclude &lt;field:val&gt;</code></td><td>Remove matching events from current results (supports wildcards)</td></tr>
+  <tr><td><code>unique &lt;field&gt;</code></td><td>Deduplicate results by field value</td></tr>
+  <tr><td><code>timeline</code></td><td>ASCII histogram of events over time</td></tr>
+  <tr><td><code>highlight &lt;pat&gt;</code> / <code>unhighlight</code></td><td>Highlight/clear text pattern in output</td></tr>
+  <tr><td colspan="2"><strong>Analysis &amp; Reports</strong></td></tr>
+  <tr><td><code>stats</code></td><td>Full statistics for current events</td></tr>
+  <tr><td><code>top-talkers</code></td><td>Quick summary of top IPs, sources, event IDs</td></tr>
+  <tr><td><code>severity</code></td><td>Severity breakdown with bar chart</td></tr>
+  <tr><td><code>heatmap</code></td><td>24-hour event density grid</td></tr>
+  <tr><td><code>analyze &lt;engine&gt;</code></td><td>Run analysis (<code>failed-logins</code>, <code>vpn-sessions</code>, <code>ipsec-tunnel</code>)</td></tr>
+  <tr><td><code>report &lt;type&gt; [--export &lt;path&gt;]</code></td><td>Generate report (<code>summary</code>, <code>morning</code>, <code>audit</code>, <code>compliance</code>, <code>timeline</code>)</td></tr>
+  <tr><td colspan="2"><strong>Data Management</strong></td></tr>
+  <tr><td><code>load &lt;file&gt;</code></td><td>Load additional log file</td></tr>
+  <tr><td><code>sources</code></td><td>List loaded sources</td></tr>
+  <tr><td><code>fields</code></td><td>List available fields</td></tr>
+  <tr><td><code>export &lt;fmt&gt; &lt;path&gt;</code></td><td>Export events (<code>csv</code>, <code>json</code>, <code>html</code>)</td></tr>
+  <tr><td><code>clear</code></td><td>Clear active filter</td></tr>
+  <tr><td><code>undo</code></td><td>Restore previous filter state</td></tr>
+  <tr><td colspan="2"><strong>Session</strong></td></tr>
+  <tr><td><code>history</code> / <code>!N</code></td><td>Command history / re-execute command #N</td></tr>
+  <tr><td><code>alias [name] [query]</code></td><td>Create or list query aliases</td></tr>
+  <tr><td><code>pin</code> / <code>unpin</code> / <code>pinned</code></td><td>Pin, clear, or switch to pinned results</td></tr>
+  <tr><td><code>output &lt;format&gt;</code></td><td>Set display format (Grid, Table, List)</td></tr>
+  <tr><td><code>columns &lt;fields&gt;</code></td><td>Set display columns (<code>columns reset</code> for defaults)</td></tr>
+  <tr><td><code>width &lt;field&gt; &lt;N&gt;</code></td><td>Set column width</td></tr>
+  <tr><td><code>help [cmd]</code></td><td>Show help or per-command details</td></tr>
+  <tr><td><code>exit</code></td><td>Exit interactive mode</td></tr>
+</table>
+
+<div class="note">See the <strong>Interactive Mode Guide</strong> for detailed usage, investigation workflows, and examples.</div>
+
+<!-- 10. LIVE TAIL MODE -->
+<h2 id="tail">10. Live Tail Mode</h2>
+
+<p>Monitor a log file in real-time with parsed, color-coded output:</p>
+
+<pre><code>.\Invoke-LogParser.ps1 -Path firewall.log -Tail
+.\Invoke-LogParser.ps1 -Path firewall.log -Tail -TailLines 50
+.\Invoke-LogParser.ps1 -Path firewall.log -Tail -Filter "action:deny"
+.\Invoke-LogParser.ps1 -Path firewall.log -Tail -Highlight "10\.12\.1\.50"</code></pre>
+
+<p>Uses <code>Get-Content -Wait</code> under the hood. Press <strong>Ctrl+C</strong> to stop.</p>
+
+<!-- 11. ENRICHMENT DATA -->
+<h2 id="enrichment">11. Enrichment Data</h2>
+
+<p>All enrichment data is embedded in the script &mdash; no external data files needed:</p>
+
+<ul>
+  <li><strong>Windows Event IDs</strong> &mdash; 100+ annotated IDs covering Security, AD, NPS, Hyper-V, DHCP, and Defender</li>
+  <li><strong>NPS/RADIUS reason codes</strong> &mdash; 40+ translations for denial reasons</li>
+  <li><strong>FortiGate mappings</strong> &mdash; type/subtype descriptions, log ID ranges, FortiClient module names</li>
+  <li><strong>Severity normalization</strong> &mdash; maps vendor-specific levels to a standard five-level scale: Critical, High, Medium, Low, Info</li>
+</ul>
+
+<!-- 12. PARAMETER REFERENCE -->
+<div class="page-break"></div>
+<h2 id="parameters">12. Parameter Reference</h2>
+
+<h3>Input</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-Path</code></td><td>Log file(s), glob patterns, or <code>.zip</code> archives. Accepts multiple comma-separated values.</td></tr>
+  <tr><td><code>-Format</code></td><td>Force a specific parser: <code>FortiGateConf</code>, <code>FortiGateKV</code>, <code>FortiClientLocal</code>, <code>FortiSwitchEvent</code>, <code>WindowsEvtx</code>. Omit for auto-detection.</td></tr>
+  <tr><td><code>-InputObject</code></td><td>Accept piped input (requires <code>-Format</code> since auto-detection needs a file).</td></tr>
+</table>
+
+<h3>Filtering</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-Filter</code></td><td>Query string using field matching, boolean operators, and pipeline ops.</td></tr>
+  <tr><td><code>-Regex</code></td><td>Regex filter matched against raw log lines. Invalid patterns produce a warning.</td></tr>
+  <tr><td><code>-Surround</code></td><td>Show all events within N seconds of each matching event.</td></tr>
+</table>
+
+<h3>Output</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-OutputFormat</code></td><td>Display format: <code>Table</code> (default), <code>Grid</code>, <code>List</code>, <code>Raw</code>, <code>Json</code>, <code>Csv</code>.</td></tr>
+  <tr><td><code>-Fields</code></td><td>Comma-separated fields to display. Works with all output formats.</td></tr>
+  <tr><td><code>-MaxResults</code></td><td>Limit the number of displayed events.</td></tr>
+  <tr><td><code>-Highlight</code></td><td>Color-highlight text matching this pattern without filtering events out.</td></tr>
+  <tr><td><code>-Context</code></td><td>Show N raw log lines before and after each matching event (like <code>grep -C</code>).</td></tr>
+  <tr><td><code>-NoColor</code></td><td>Disable colored output.</td></tr>
+  <tr><td><code>-Quiet</code></td><td>Suppress console output (useful with <code>-ExportPath</code>).</td></tr>
+  <tr><td><code>-Clipboard</code></td><td>Copy output to clipboard (via <code>Set-Clipboard</code>).</td></tr>
+</table>
+
+<h3>Analysis &amp; Reports</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-Analyze</code></td><td>Run an analysis engine: <code>FailedLogins</code>, <code>VpnSessions</code>, <code>IpsecTunnel</code>, <code>Summary</code>.</td></tr>
+  <tr><td><code>-Report</code></td><td>Generate a report: <code>Summary</code>, <code>Morning</code>, <code>Audit</code>, <code>Compliance</code>, <code>Timeline</code>.</td></tr>
+  <tr><td><code>-ExportPath</code></td><td>File path to write a report.</td></tr>
+  <tr><td><code>-ExportFormat</code></td><td>Export format: <code>Html</code>, <code>Csv</code>, <code>Json</code>.</td></tr>
+  <tr><td><code>-Open</code></td><td>Auto-open the exported file after creation.</td></tr>
+  <tr><td><code>-StatsOnly</code></td><td>Show only parse statistics / quick digest, not individual events.</td></tr>
+</table>
+
+<h3>Modes</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-Interactive</code></td><td>Launch interactive query mode (REPL).</td></tr>
+  <tr><td><code>-Tail</code></td><td>Monitor the log file in real-time.</td></tr>
+  <tr><td><code>-TailLines</code></td><td>Number of existing lines to show before tailing. Default: 20.</td></tr>
+  <tr><td><code>-Section</code></td><td>Extract a specific section from a FortiGate config file. Supports wildcards.</td></tr>
+</table>
+
+<h3>Discovery</h3>
+<table>
+  <tr><th style="width:25%">Parameter</th><th>Description</th></tr>
+  <tr><td><code>-ListParsers</code></td><td>List available log format parsers.</td></tr>
+  <tr><td><code>-ListAnalyzers</code></td><td>List available analysis engines.</td></tr>
+  <tr><td><code>-ListReports</code></td><td>List available report types.</td></tr>
+</table>
+
+<!-- 13. ARCHITECTURE -->
+<h2 id="architecture">13. Architecture</h2>
+
+<p>Single file (<code>Invoke-LogParser.ps1</code>, ~2,900 lines) organized into 13 sections:</p>
+
+<table>
+  <tr><th style="width:5%">#</th><th style="width:35%">Section</th><th>Purpose</th></tr>
+  <tr><td>1</td><td>Parameters &amp; Configuration</td><td>CmdletBinding, ANSI color system, script-level state</td></tr>
+  <tr><td>2</td><td>Enrichment Data</td><td>FortiGate mappings, Windows Event IDs, NPS codes</td></tr>
+  <tr><td>3</td><td>Parsers</td><td>5 format parsers + auto-detect + dispatcher</td></tr>
+  <tr><td>4</td><td>Filter Engine</td><td>Query parser, field matching, pipeline operators</td></tr>
+  <tr><td>5</td><td>Analysis Engines</td><td>Failed logins, VPN sessions, IPsec tunnel health</td></tr>
+  <tr><td>6</td><td>Output Formatter</td><td>Table, Grid, List, Raw, Json, Csv + analysis result renderers</td></tr>
+  <tr><td>7</td><td>Config Tools</td><td>FortiGate section extraction, syntax highlighting</td></tr>
+  <tr><td>8</td><td>Report Engine</td><td>Report generators + HTML/console renderers</td></tr>
+  <tr><td>9</td><td>Interactive Mode</td><td>REPL with query, analyze, export commands</td></tr>
+  <tr><td>10</td><td>Live Tail Mode</td><td>Real-time parsed output via Get-Content -Wait</td></tr>
+  <tr><td>11</td><td>Output Helpers</td><td>Clipboard, file open</td></tr>
+  <tr><td>12</td><td>Zip Extraction</td><td>Archive handling with nested zip support and format discovery</td></tr>
+  <tr><td>13</td><td>Main Execution</td><td>Orchestration, pipeline support, cleanup</td></tr>
+</table>
+
+<!-- 14. WORKFLOW EXAMPLES -->
+<div class="page-break"></div>
+<h2 id="examples">14. Workflow Examples</h2>
+
+<h3>Daily Security Review</h3>
+<pre><code><span class="comment"># 1. Quick stats across all log sources</span>
+.\Invoke-LogParser.ps1 -Path *.log,dc01-security.xml -StatsOnly
+
+<span class="comment"># 2. Morning briefing report</span>
+.\Invoke-LogParser.ps1 -Path *.log,dc01-security.xml -Report Morning
+
+<span class="comment"># 3. Drill into failed logins</span>
+.\Invoke-LogParser.ps1 -Path *.log,dc01-security.xml -Analyze FailedLogins
+
+<span class="comment"># 4. Investigate a specific user</span>
+.\Invoke-LogParser.ps1 -Path *.log,dc01-security.xml -Filter "user:jsmith" -OutputFormat Grid</code></pre>
+
+<h3>Incident Investigation</h3>
+<pre><code><span class="comment"># 1. Find critical events</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Filter "severity:Critical" -OutputFormat Grid
+
+<span class="comment"># 2. Get surrounding context (30 second window)</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,switch.log -Filter "severity:Critical" -Surround 30
+
+<span class="comment"># 3. Regex search with raw line context</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -Regex "tunnel.*down|phase[12].*fail" -Context 5
+
+<span class="comment"># 4. Export timeline for the incident</span>
+.\Invoke-LogParser.ps1 -Path firewall.log,switch.log -Report Timeline -ExportPath incident.html -ExportFormat Html</code></pre>
+
+<h3>Compliance Audit</h3>
+<pre><code><span class="comment"># 1. Audit report from domain controller logs</span>
+.\Invoke-LogParser.ps1 -Path dc01-security.xml -Report Audit -ExportPath audit.html -ExportFormat Html
+
+<span class="comment"># 2. FFIEC compliance mapping</span>
+.\Invoke-LogParser.ps1 -Path dc01-security.xml,firewall.log -Report Compliance -ExportPath compliance.html -ExportFormat Html
+
+<span class="comment"># 3. Review FortiGate config for security issues</span>
+.\Invoke-LogParser.ps1 -Path config.conf -Filter "severity:Medium OR severity:High" -OutputFormat Grid</code></pre>
+
+<h3>FortiClient Endpoint Logs</h3>
+<pre><code><span class="comment"># 1. Parse FortiClient local log, show only structured events</span>
+.\Invoke-LogParser.ps1 -Path forticlient.log -Filter "LogType:Event" -OutputFormat Grid
+
+<span class="comment"># 2. Find compliance failures</span>
+.\Invoke-LogParser.ps1 -Path forticlient.log -Filter "LogType:Event AND eventtype:compliance"
+
+<span class="comment"># 3. Export all events from a specific endpoint</span>
+.\Invoke-LogParser.ps1 -Path forticlient.log -Filter "hostname:WS-PC01" -OutputFormat Csv > endpoint-events.csv</code></pre>
+
+<h3>Pipeline Integration</h3>
+<pre><code><span class="comment"># Pipe into native PowerShell for custom processing</span>
+.\Invoke-LogParser.ps1 -Path firewall.log -OutputFormat Raw |
+    Where-Object { $_.Extra.dstport -eq '3389' } |
+    Group-Object { $_.Extra.srcip } |
+    Sort-Object Count -Descending |
+    Select-Object Count, Name -First 10
+
+<span class="comment"># Feed piped content into the parser</span>
+Get-Content firewall.log | .\Invoke-LogParser.ps1 -Format FortiGateKV -Filter "action:deny" -OutputFormat Json</code></pre>
+
+</body>
+</html>
