@@ -2322,241 +2322,944 @@ function Export-Report {
 # SECTION 9: Interactive Mode (REPL)
 # ============================================================================
 
+
+# --- A1: Command Registry ---
+$script:ILPCommands = [ordered]@{}
+function Register-ILPCommand {
+    param([string]$Name, [string]$Pattern, [string]$Category, [string]$Usage, [string]$Help, [scriptblock]$Handler)
+    $script:ILPCommands[$Name] = [PSCustomObject]@{ Name = $Name; Pattern = $Pattern; Category = $Category; Usage = $Usage; Help = $Help; Handler = $Handler }
+}
+
+# --- A3: Event Field Index ---
+function Update-FieldIndex {
+    param([PSCustomObject]$Session, [string[]]$Fields)
+    $total = $Session.AllEvents.Count
+    foreach ($field in $Fields) {
+        $idx = @{}
+        for ($i = 0; $i -lt $total; $i++) {
+            $val = Get-EventFieldValue -Event $Session.AllEvents[$i] -Field $field
+            if ($val) { $vs = "$val"; if (-not $idx.ContainsKey($vs)) { $idx[$vs] = [System.Collections.Generic.List[int]]::new() }; $idx[$vs].Add($i) }
+            if ($i % 50000 -eq 0 -and $total -gt 10000) { Write-ILPProgress "Indexing $field" $i $total }
+        }
+        $Session.FieldIndex[$field] = $idx
+    }
+}
+
+# --- A4: Config Loading ---
+function Import-ILPConfig {
+    $config = @{ maxUndoDepth = 50; pageSize = 0; journalAutoLog = $true; autoIndex = @('srcip','dstip','user','action','severity') }
+    foreach ($dir in @($PSScriptRoot, $HOME, (Get-Location).Path)) {
+        if (-not $dir) { continue }
+        $p = Join-Path $dir '.ilp-config.json'
+        if (Test-Path $p) {
+            try { $loaded = Get-Content $p -Raw | ConvertFrom-Json; foreach ($prop in $loaded.PSObject.Properties) { $config[$prop.Name] = $prop.Value } } catch {}
+            break
+        }
+    }
+    return $config
+}
+
+# --- 1d: Progress Indicator ---
+function Write-ILPProgress {
+    param([string]$Label, [int]$Current, [int]$Total)
+    if ($Total -le 0) { return }
+    $pct = [Math]::Min(100, [int](($Current / $Total) * 100))
+    $filled = [int]($pct / 5); $empty = 20 - $filled
+    $bar = ([string][char]0x2588 * $filled) + ([string][char]0x2591 * $empty)
+    Write-Host "`r  [$bar] $pct% - $Label" -NoNewline
+    if ($Current -ge $Total) { Write-Host '' }
+}
+
+# --- 1c: Fuzzy Match ---
+function Get-LevenshteinDistance {
+    param([string]$s, [string]$t)
+    $n = $s.Length; $m = $t.Length
+    if ($n -eq 0) { return $m }; if ($m -eq 0) { return $n }
+    $d = New-Object 'int[,]' ($n+1),($m+1)
+    for ($i = 0; $i -le $n; $i++) { $d[$i,0] = $i }
+    for ($j = 0; $j -le $m; $j++) { $d[0,$j] = $j }
+    for ($i = 1; $i -le $n; $i++) { for ($j = 1; $j -le $m; $j++) {
+        $cost = if ($s[$i-1] -eq $t[$j-1]) { 0 } else { 1 }
+        $d[$i,$j] = [Math]::Min([Math]::Min($d[($i-1),$j]+1, $d[$i,($j-1)]+1), $d[($i-1),($j-1)]+$cost)
+    }}
+    return $d[$n,$m]
+}
+
+# --- Duration Parser ---
+function ConvertTo-TimeSpanFromDuration {
+    param([string]$Dur)
+    if ($Dur -match '^(\d+)([smhd])$') {
+        $v = [int]$Matches[1]
+        switch ($Matches[2]) { 's' { [timespan]::FromSeconds($v) } 'm' { [timespan]::FromMinutes($v) } 'h' { [timespan]::FromHours($v) } 'd' { [timespan]::FromDays($v) } }
+    } else { $null }
+}
+
+# --- Kerberos Encryption Types ---
+$script:KerberosEtypeLookup = @{
+    '0x1'='DES-CBC-CRC'; '0x3'='DES-CBC-MD5'; '0x11'='AES128-CTS-HMAC-SHA1-96'
+    '0x12'='AES256-CTS-HMAC-SHA1-96'; '0x17'='RC4-HMAC-MD5'; '0x18'='RC4-HMAC-MD5-EXP'
+}
+
+# ============================================================================
+# Command Registrations
+# ============================================================================
+
+# --- INSPECTION ---
+Register-ILPCommand -Name 'show' -Pattern '^show\s+(\d+)$' -Category 'Inspection' -Usage 'show <N>' `
+    -Help "Display all fields for event #N.`nExample: show 1" -Handler {
+    param($s,$m); $c = $script:C; $idx = [int]$m[1] - 1
+    if ($idx -lt 0 -or $idx -ge $s.FilteredEvents.Count) { Write-Host "Event index out of range (1-$($s.FilteredEvents.Count))"; return }
+    $ev = $s.FilteredEvents[$idx]; $hl = [string][char]0x2500
+    Write-ColorText "$($hl*3) Event #$($m[1]) $($hl*40)" $c.BoldWhite
+    $flds = [ordered]@{}
+    $flds['Timestamp'] = if ($ev.Timestamp -ne [datetime]::MinValue) { $ev.Timestamp.ToString('yyyy-MM-dd HH:mm:ss.fff') } else { '(none)' }
+    $flds['Severity'] = $ev.Severity; $flds['Source'] = $ev.Source; $flds['Message'] = $ev.Message
+    foreach ($k in ($ev.Extra.Keys | Sort-Object)) { $flds[$k] = $ev.Extra[$k] }
+    $flds['SourceFile'] = $ev.SourceFile; $flds['SourceFormat'] = $ev.SourceFormat
+    if ($ev.LineNumber -gt 0) { $flds['LineNumber'] = $ev.LineNumber }
+    $ml = ($flds.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    foreach ($k in $flds.Keys) {
+        $val = "$($flds[$k])"; if ($s.Highlight) { $val = Add-Highlight $val $s.Highlight }
+        $sc = if ($k -eq 'Severity' -and $script:SevColor.ContainsKey("$($flds[$k])")) { $script:SevColor["$($flds[$k])"] } else { '' }
+        $wm = ''; if ($s.Watchlist.Count -gt 0 -and $s.Watchlist.ContainsKey($k)) { foreach ($wv in $s.Watchlist[$k]) { if ("$($flds[$k])" -eq $wv) { $wm = " $($c.BgRed)!WATCH$($c.Reset)" } } }
+        Write-Host "  $($c.Cyan)$($k.PadRight($ml))$($c.Reset)  $sc$val$($c.Reset)$wm"
+    }
+    if ($ev.RawLine) { Write-Host ''; Write-ColorText "  $($hl*3) Raw $($hl*48)" $c.Dim; $rd = if ($s.Highlight) { Add-Highlight $ev.RawLine $s.Highlight } else { $ev.RawLine }; Write-Host "  $rd" }
+    Write-ColorText "$($hl*55)" $c.Dim
+}
+
+Register-ILPCommand -Name 'raw' -Pattern '^raw\s+(\d+)$' -Category 'Inspection' -Usage 'raw <N>' `
+    -Help "Display raw log line for event #N." -Handler {
+    param($s,$m); $idx = [int]$m[1] - 1
+    if ($idx -lt 0 -or $idx -ge $s.FilteredEvents.Count) { Write-Host "Event index out of range (1-$($s.FilteredEvents.Count))"; return }
+    $rl = $s.FilteredEvents[$idx].RawLine; if (-not $rl) { Write-Host '(no raw line available)'; return }
+    if ($s.Highlight) { $rl = Add-Highlight $rl $s.Highlight }; Write-Host $rl
+}
+
+Register-ILPCommand -Name 'context' -Pattern '^context\s+(\d+)(\s+(\d+))?$' -Category 'Inspection' -Usage 'context <N> [lines]' `
+    -Help "Show surrounding raw lines from source file. Default: 3 lines." -Handler {
+    param($s,$m); $idx = [int]$m[1] - 1; $cl = if ($m[3]) { [int]$m[3] } else { 3 }
+    if ($idx -lt 0 -or $idx -ge $s.FilteredEvents.Count) { Write-Host "Event index out of range (1-$($s.FilteredEvents.Count))"; return }
+    $ev = $s.FilteredEvents[$idx]; $sf = $ev.SourceFile
+    if (-not $sf -or -not $ev.LineNumber) { Write-Host 'No source file or line number.'; return }
+    if (-not $script:RawFileLines.ContainsKey($sf)) { try { $script:RawFileLines[$sf] = [System.IO.File]::ReadAllLines($sf) } catch { Write-Host "Could not read: $_"; return } }
+    Write-ContextBlock -Event $ev -ContextLines $cl -AllRawLines $script:RawFileLines[$sf]
+}
+
+Register-ILPCommand -Name 'page' -Pattern '^(next|prev)$' -Category 'Inspection' -Usage 'next / prev' `
+    -Help "Page through results. Auto-detects terminal height." -Handler {
+    param($s,$m); $dir = $m[1]; if ($s.FilteredEvents.Count -eq 0) { Write-Host 'No events.'; return }
+    $ps = if ($s.Config.pageSize -gt 0) { $s.Config.pageSize } else { try { [Math]::Max(5, [console]::WindowHeight - 5) } catch { 20 } }
+    $mp = [Math]::Max(0, [Math]::Ceiling($s.FilteredEvents.Count / $ps) - 1)
+    if ($dir -eq 'next') { $s.PageIndex = [Math]::Min($s.PageIndex + 1, $mp) } else { $s.PageIndex = [Math]::Max($s.PageIndex - 1, 0) }
+    $si = $s.PageIndex * $ps; $ei = [Math]::Min($si + $ps, $s.FilteredEvents.Count)
+    Write-Host "$($script:C.Dim)Events $($si+1)-$ei of $($s.FilteredEvents.Count)$($script:C.Reset)"
+    $pe = [System.Collections.Generic.List[object]]::new(); for ($i = $si; $i -lt $ei; $i++) { $pe.Add($s.FilteredEvents[$i]) }
+    switch ($s.OutputFormat) {
+        'Table' { Format-LogTable -Events $pe -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max $ps }
+        'List'  { Format-LogList -Events $pe -HighlightPattern $s.Highlight -Max $ps }
+        default { Format-LogGrid -Events $pe -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max $ps }
+    }
+}
+
+Register-ILPCommand -Name 'goto' -Pattern '^goto\s+(\d+)$' -Category 'Inspection' -Usage 'goto <N>' `
+    -Help "Jump to page containing event #N." -Handler {
+    param($s,$m); $tn = [int]$m[1]; if ($s.FilteredEvents.Count -eq 0) { Write-Host 'No events.'; return }
+    if ($tn -lt 1 -or $tn -gt $s.FilteredEvents.Count) { Write-Host "Out of range (1-$($s.FilteredEvents.Count))"; return }
+    $ps = if ($s.Config.pageSize -gt 0) { $s.Config.pageSize } else { try { [Math]::Max(5, [console]::WindowHeight - 5) } catch { 20 } }
+    $s.PageIndex = [Math]::Floor(($tn - 1) / $ps)
+    $si = $s.PageIndex * $ps; $ei = [Math]::Min($si + $ps, $s.FilteredEvents.Count)
+    Write-Host "$($script:C.Dim)Events $($si+1)-$ei of $($s.FilteredEvents.Count)$($script:C.Reset)"
+    $pe = [System.Collections.Generic.List[object]]::new(); for ($i = $si; $i -lt $ei; $i++) { $pe.Add($s.FilteredEvents[$i]) }
+    switch ($s.OutputFormat) {
+        'Table' { Format-LogTable -Events $pe -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max $ps }
+        'List'  { Format-LogList -Events $pe -HighlightPattern $s.Highlight -Max $ps }
+        default { Format-LogGrid -Events $pe -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max $ps }
+    }
+}
+
+Register-ILPCommand -Name 'diff' -Pattern '^diff\s+(\d+)\s+(\d+)$' -Category 'Inspection' -Usage 'diff <N> <M>' `
+    -Help "Compare two events side-by-side, showing differing fields." -Handler {
+    param($s,$m); $c = $script:C; $i1 = [int]$m[1]-1; $i2 = [int]$m[2]-1
+    if ($i1 -lt 0 -or $i1 -ge $s.FilteredEvents.Count -or $i2 -lt 0 -or $i2 -ge $s.FilteredEvents.Count) { Write-Host "Out of range (1-$($s.FilteredEvents.Count))"; return }
+    $e1 = $s.FilteredEvents[$i1]; $e2 = $s.FilteredEvents[$i2]; $ak = [ordered]@{}
+    foreach ($k in @('Timestamp','Severity','Source','Message')) { $ak[$k] = $true }
+    foreach ($k in $e1.Extra.Keys) { $ak[$k] = $true }; foreach ($k in $e2.Extra.Keys) { $ak[$k] = $true }
+    Write-ColorText "$([string][char]0x2500*3) Diff: #$($m[1]) vs #$($m[2]) $([string][char]0x2500*30)" $c.BoldWhite
+    Write-Host "  $($c.Dim)$('FIELD'.PadRight(18))  $('#'+$m[1]+' VALUE').PadRight(30)  $('#'+$m[2]+' VALUE')$($c.Reset)"
+    foreach ($k in $ak.Keys) {
+        $v1 = if ($e1.PSObject.Properties[$k]) { "$($e1.$k)" } elseif ($e1.Extra.ContainsKey($k)) { "$($e1.Extra[$k])" } else { '(absent)' }
+        $v2 = if ($e2.PSObject.Properties[$k]) { "$($e2.$k)" } elseif ($e2.Extra.ContainsKey($k)) { "$($e2.Extra[$k])" } else { '(absent)' }
+        if ($v1 -ne $v2) { $l = if ($k.Length -gt 18) { $k.Substring(0,15)+'...' } else { $k }; $d1 = if ($v1.Length -gt 30) { $v1.Substring(0,27)+'...' } else { $v1 }; $d2 = if ($v2.Length -gt 30) { $v2.Substring(0,27)+'...' } else { $v2 }
+            Write-Host "  $($c.Yellow)$($l.PadRight(18))$($c.Reset)  $($c.Red)$($d1.PadRight(30))$($c.Reset)  $($c.Green)$d2$($c.Reset)" }
+    }
+}
+
+# --- INVESTIGATION ---
+Register-ILPCommand -Name 'whois' -Pattern '^(whois|inspect)\s+([\w-]+)$' -Category 'Investigation' -Usage 'whois <field>' `
+    -Help "Field value summary with bar chart (top 20). Alias: inspect" -Handler {
+    param($s,$m); $c = $script:C; $field = $m[2]; $vc = @{}
+    foreach ($ev in $s.FilteredEvents) { $val = Get-EventFieldValue -Event $ev -Field $field; if ($null -ne $val) { $vs = "$val"; if (-not $vc.ContainsKey($vs)) { $vc[$vs] = 0 }; $vc[$vs]++ } }
+    if ($vc.Count -eq 0) { Write-Host "No values for '$field'"; return }
+    $sorted = $vc.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 20
+    $mx = ($sorted | Select-Object -First 1).Value; if ($mx -eq 0) { $mx = 1 }
+    $bw = [Math]::Max(10, (Get-TerminalWidth) - 45); $mkl = [Math]::Min(20, ($sorted | ForEach-Object { $_.Key.Length } | Measure-Object -Maximum).Maximum)
+    Write-ColorText "$([string][char]0x2500*3) $field ($($vc.Count) unique) $([string][char]0x2500*30)" $c.BoldWhite
+    foreach ($e in $sorted) { $b = [string][char]0x2588 * [Math]::Max(0, [int](($e.Value/$mx)*$bw)); $lb = if ($e.Key.Length -gt 20) { $e.Key.Substring(0,17)+'...' } else { $e.Key }
+        $wm = ''; if ($s.Watchlist.ContainsKey($field) -and $s.Watchlist[$field] -contains $e.Key) { $wm = " $($c.BgRed)!$($c.Reset)" }
+        Write-Host "  $($lb.PadRight($mkl))  $($c.Cyan)$b$($c.Reset)  $(Format-Number $e.Value)$wm" }
+}
+
+Register-ILPCommand -Name 'timeline' -Pattern '^timeline(\s+--severity)?$' -Category 'Investigation' -Usage 'timeline [--severity]' `
+    -Help "ASCII histogram of events over time. --severity adds color-coded severity." -Handler {
+    param($s,$m); $c = $script:C; $showSev = [bool]$m[1]
+    $wt = $s.FilteredEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue }
+    if (-not $wt -or @($wt).Count -eq 0) { Write-Host 'No timestamped events.'; return }
+    $minTs = ($wt | ForEach-Object { $_.Timestamp } | Measure-Object -Minimum).Minimum
+    $maxTs = ($wt | ForEach-Object { $_.Timestamp } | Measure-Object -Maximum).Maximum
+    $span = $maxTs - $minTs
+    if ($span.TotalHours -lt 2) { $bm = 5; $fmt = 'HH:mm' } elseif ($span.TotalHours -lt 48) { $bm = 60; $fmt = 'MM-dd HH:mm' } else { $bm = 1440; $fmt = 'yyyy-MM-dd' }
+    $bks = [ordered]@{}; $bkSev = @{}
+    $cur = if ($bm -ge 1440) { $minTs.Date } else { $minTs.AddMinutes(-($minTs.Minute % $bm)).AddSeconds(-$minTs.Second) }
+    while ($cur -le $maxTs) { $bks[$cur] = 0; $bkSev[$cur] = 0; $cur = $cur.AddMinutes($bm) }
+    foreach ($ev in $wt) { $bk = if ($bm -ge 1440) { $ev.Timestamp.Date } else { $ev.Timestamp.AddMinutes(-($ev.Timestamp.Minute % $bm)).AddSeconds(-$ev.Timestamp.Second) }
+        if ($bks.Contains($bk)) { $bks[$bk]++ } else { $bks[$bk] = 1 }
+        if ($ev.Severity -in @('Critical','High')) { if ($bkSev.ContainsKey($bk)) { $bkSev[$bk]++ } else { $bkSev[$bk] = 1 } } }
+    $mx = ($bks.Values | Measure-Object -Maximum).Maximum; if ($mx -eq 0) { $mx = 1 }
+    $bw = [Math]::Max(10, (Get-TerminalWidth) - 30)
+    Write-ColorText "$([string][char]0x2500*3) Timeline $([string][char]0x2500*44)" $c.BoldWhite
+    foreach ($bk in $bks.Keys) { $cnt = $bks[$bk]; $w = [Math]::Max(0, [int](($cnt/$mx)*$bw)); $bar = [string][char]0x2588 * $w
+        $bc = if ($showSev -and $cnt -gt 0 -and ($bkSev[$bk]/$cnt) -gt 0.3) { $c.Red } else { $c.Cyan }
+        $suf = if ($showSev -and $cnt -gt 0) { "  (H:$($bkSev[$bk]))" } else { '' }
+        Write-Host "  $($bk.ToString($fmt).PadRight(16))  $bc$bar$($c.Reset)  $cnt$suf" }
+}
+
+Register-ILPCommand -Name 'correlate' -Pattern '^correlate\s+([\w-]+)(\s+using\s+\$(\w+))?$' -Category 'Investigation' -Usage 'correlate <field> [using $var]' `
+    -Help "Pivot: find ALL events sharing field values with current results.`nOptionally use stored variable values instead." -Handler {
+    param($s,$m); $field = $m[1]; $varName = $m[3]
+    $values = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($varName -and $s.Variables.ContainsKey($varName)) { foreach ($v in $s.Variables[$varName]) { $values.Add("$v") | Out-Null } }
+    else { foreach ($ev in $s.FilteredEvents) { $val = Get-EventFieldValue -Event $ev -Field $field; if ($val) { $values.Add("$val") | Out-Null } } }
+    if ($values.Count -eq 0) { Write-Host "No values for '$field'."; return }
+    $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $cor = [System.Collections.Generic.List[object]]::new()
+    if ($s.FieldIndex.ContainsKey($field)) { foreach ($v in $values) { if ($s.FieldIndex[$field].ContainsKey($v)) { foreach ($i in $s.FieldIndex[$field][$v]) { $cor.Add($s.AllEvents[$i]) } } } }
+    else { foreach ($ev in $s.AllEvents) { $val = Get-EventFieldValue -Event $ev -Field $field; if ($val -and $values.Contains("$val")) { $cor.Add($ev) } } }
+    $s.FilteredEvents = $cor; $s.ActiveFilter = "correlate:$field"; $s.PageIndex = 0
+    Write-Host "Correlated on $($values.Count) unique $field values: $(Format-Number $s.FilteredEvents.Count) events"
+    if ($s.FilteredEvents.Count -gt 0 -and $s.FilteredEvents.Count -le 50) { Format-LogGrid -Events $s.FilteredEvents -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max 50 }
+}
+
+Register-ILPCommand -Name 'search' -Pattern '^search\s+(.+)$' -Category 'Investigation' -Usage 'search <text>' `
+    -Help "Free-text case-insensitive search across all fields." -Handler {
+    param($s,$m); $st = $m[1]; $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.FilteredEvents) { $hit = $false
+        if ($ev.Severity -and $ev.Severity.IndexOf($st, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+        if (-not $hit -and $ev.Source -and $ev.Source.IndexOf($st, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+        if (-not $hit -and $ev.Message -and $ev.Message.IndexOf($st, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+        if (-not $hit -and $ev.RawLine -and $ev.RawLine.IndexOf($st, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true }
+        if (-not $hit -and $ev.Extra) { foreach ($v in $ev.Extra.Values) { if ("$v".IndexOf($st, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true; break } } }
+        if ($hit) { $found.Add($ev) } }
+    $s.FilteredEvents = $found; $s.ActiveFilter = "search:$st"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $s.FilteredEvents.Count) events matching '$st'"
+    if ($s.FilteredEvents.Count -gt 0 -and $s.FilteredEvents.Count -le 50) { Format-LogGrid -Events $s.FilteredEvents -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max 50 }
+}
+
+Register-ILPCommand -Name 'exclude' -Pattern '^exclude\s+([\w-]+):(.+)$' -Category 'Investigation' -Usage 'exclude <field>:<value>' `
+    -Help "Remove matching events. Supports wildcards.`nExample: exclude severity:Info" -Handler {
+    param($s,$m); $ef = $m[1]; $ev2 = $m[2]; $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $kept = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.FilteredEvents) { $fv = Get-EventFieldValue -Event $ev -Field $ef; if (-not $fv -or -not ([string]$fv -like $ev2)) { $kept.Add($ev) } }
+    $s.FilteredEvents = $kept; $s.ActiveFilter = "exclude $ef`:$ev2"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $s.FilteredEvents.Count) events (excluded $ef=$ev2)"
+    if ($s.FilteredEvents.Count -gt 0 -and $s.FilteredEvents.Count -le 50) { Format-LogGrid -Events $s.FilteredEvents -HighlightPattern $s.Highlight -FieldList $s.DisplayColumns -Max 50 }
+}
+
+Register-ILPCommand -Name 'unique' -Pattern '^unique\s+([\w-]+)$' -Category 'Investigation' -Usage 'unique <field>' `
+    -Help "Deduplicate by field value, keeping first event per value." -Handler {
+    param($s,$m); $uf = $m[1]; $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $oc = $s.FilteredEvents.Count; $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $dd = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.FilteredEvents) { $val = Get-EventFieldValue -Event $ev -Field $uf; $k = if ($val) { "$val" } else { '(empty)' }; if ($seen.Add($k)) { $dd.Add($ev) } }
+    $s.FilteredEvents = $dd; $s.ActiveFilter = "unique:$uf"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $dd.Count) unique $uf values (from $(Format-Number $oc) events)"
+}
+
+Register-ILPCommand -Name 'highlight' -Pattern '^highlight\s+(.+)$' -Category 'Investigation' -Usage 'highlight <pattern>' `
+    -Help "Highlight matching text in yellow. Same pattern again clears." -Handler {
+    param($s,$m); $p = $m[1]; if ($s.Highlight -eq $p) { $s.Highlight = ''; Write-Host 'Highlight cleared.' } else { $s.Highlight = $p; Write-Host "Highlighting: $($script:C.BgYellow)$($script:C.Bold)$p$($script:C.Reset)" }
+}
+Register-ILPCommand -Name 'unhighlight' -Pattern '^unhighlight$' -Category 'Investigation' -Usage 'unhighlight' -Help 'Clear highlight.' -Handler { param($s,$m); $s.Highlight = ''; Write-Host 'Highlight cleared.' }
+
+Register-ILPCommand -Name 'follow' -Pattern '^follow\s+([\w-]+)\s+->\s+([\w-]+)(\s+(\d+))?$' -Category 'Investigation' -Usage 'follow <src> -> <dst> [hops]' `
+    -Help "Multi-hop correlation for lateral movement tracing.`nDefault 2 hops, max 5." -Handler {
+    param($s,$m); $c = $script:C; $sf = $m[1]; $df = $m[2]; $hops = if ($m[4]) { [Math]::Min([int]$m[4], 5) } else { 2 }
+    $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $allSeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $allEvents = [System.Collections.Generic.List[object]]::new()
+    $seedVals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($ev in $s.FilteredEvents) { $v = Get-EventFieldValue -Event $ev -Field $sf; if ($v) { $seedVals.Add("$v") | Out-Null; $allSeen.Add("$v") | Out-Null }; $allEvents.Add($ev) }
+    Write-ColorText "$([string][char]0x2500*3) Follow: $sf -> $df ($hops hops) $([string][char]0x2500*25)" $c.BoldWhite
+    Write-Host "  Hop 0 (seed): $($seedVals.Count) $sf values from $(Format-Number $s.FilteredEvents.Count) events"
+    $currentVals = $seedVals
+    for ($h = 1; $h -le $hops; $h++) {
+        $newVals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase); $hopEvents = 0
+        foreach ($ev in $s.AllEvents) { $dv = Get-EventFieldValue -Event $ev -Field $df
+            if ($dv -and $currentVals.Contains("$dv")) { $allEvents.Add($ev); $hopEvents++
+                $sv = Get-EventFieldValue -Event $ev -Field $sf; if ($sv -and $allSeen.Add("$sv")) { $newVals.Add("$sv") | Out-Null } } }
+        Write-Host "  Hop $h`: $($newVals.Count) new $sf values, $(Format-Number $hopEvents) events"
+        if ($newVals.Count -eq 0) { break }; $currentVals = $newVals }
+    $s.FilteredEvents = $allEvents; $s.ActiveFilter = "follow:$sf->$df"; $s.PageIndex = 0
+    Write-Host "  Total: $($allSeen.Count) unique endpoints, $(Format-Number $allEvents.Count) events"
+}
+
+# --- TIME-BASED ---
+Register-ILPCommand -Name 'anchor' -Pattern '^anchor\s+(\d+)\s+(\d+[smhd])(\s+(before|after))?$' -Category 'Time' -Usage 'anchor <N> <duration> [before|after]' `
+    -Help "Find events within duration of event #N's timestamp." -Handler {
+    param($s,$m); $idx = [int]$m[1] - 1; $dur = ConvertTo-TimeSpanFromDuration $m[2]; $dir = $m[4]
+    if ($idx -lt 0 -or $idx -ge $s.FilteredEvents.Count) { Write-Host "Out of range (1-$($s.FilteredEvents.Count))"; return }
+    if (-not $dur) { Write-Host 'Invalid duration. Use: 30s, 5m, 2h, 1d'; return }
+    $ts = $s.FilteredEvents[$idx].Timestamp; if ($ts -eq [datetime]::MinValue) { Write-Host 'Event has no timestamp.'; return }
+    $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.AllEvents) { if ($ev.Timestamp -eq [datetime]::MinValue) { continue }; $d = $ev.Timestamp - $ts
+        $inRange = switch ($dir) { 'before' { $d.TotalSeconds -ge (-$dur.TotalSeconds) -and $d.TotalSeconds -le 0 } 'after' { $d.TotalSeconds -ge 0 -and $d.TotalSeconds -le $dur.TotalSeconds } default { [Math]::Abs($d.TotalSeconds) -le $dur.TotalSeconds } }
+        if ($inRange) { $found.Add($ev) } }
+    $s.FilteredEvents = $found; $s.ActiveFilter = "anchor:#$($m[1])+-$($m[2])"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $found.Count) events within $($m[2]) of event #$($m[1])"
+}
+
+Register-ILPCommand -Name 'between' -Pattern '^between\s+(.+?)\s+to\s+(.+)$' -Category 'Time' -Usage 'between <start> to <end>' `
+    -Help "Filter to time window. Flexible formats: HH:mm, MM-dd HH:mm, yyyy-MM-dd HH:mm:ss" -Handler {
+    param($s,$m); $fmts = @('yyyy-MM-dd HH:mm:ss','yyyy-MM-dd HH:mm','MM-dd HH:mm','HH:mm:ss','HH:mm')
+    $startTs = $null; $endTs = $null
+    foreach ($f in $fmts) { if ([datetime]::TryParseExact($m[1], $f, $null, 'None', [ref]$startTs)) { break } }
+    foreach ($f in $fmts) { if ([datetime]::TryParseExact($m[2], $f, $null, 'None', [ref]$endTs)) { break } }
+    if (-not $startTs -or -not $endTs) { Write-Host 'Could not parse timestamps. Use: HH:mm, MM-dd HH:mm, or yyyy-MM-dd HH:mm:ss'; return }
+    if ($startTs.Year -eq 1) { $refDate = ($s.AllEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | Select-Object -First 1).Timestamp.Date; $startTs = $refDate.Add($startTs.TimeOfDay); $endTs = $refDate.Add($endTs.TimeOfDay) }
+    $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.AllEvents) { if ($ev.Timestamp -ge $startTs -and $ev.Timestamp -le $endTs) { $found.Add($ev) } }
+    $s.FilteredEvents = $found; $s.ActiveFilter = "between:$($m[1])-$($m[2])"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $found.Count) events between $($startTs.ToString('yyyy-MM-dd HH:mm:ss')) and $($endTs.ToString('yyyy-MM-dd HH:mm:ss'))"
+}
+
+Register-ILPCommand -Name 'window' -Pattern '^(window|since)\s+(\d+[smhd])$' -Category 'Time' -Usage 'window <duration>' `
+    -Help "Show events from the last N seconds/minutes/hours/days." -Handler {
+    param($s,$m); $dur = ConvertTo-TimeSpanFromDuration $m[2]; if (-not $dur) { Write-Host 'Invalid duration.'; return }
+    $maxTs = ($s.AllEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp } | Measure-Object -Maximum).Maximum
+    if (-not $maxTs) { Write-Host 'No timestamped events.'; return }
+    $cutoff = $maxTs - $dur; $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $found = [System.Collections.Generic.List[object]]::new()
+    foreach ($ev in $s.AllEvents) { if ($ev.Timestamp -ge $cutoff) { $found.Add($ev) } }
+    $s.FilteredEvents = $found; $s.ActiveFilter = "window:$($m[2])"; $s.PageIndex = 0
+    Write-Host "$(Format-Number $found.Count) events in last $($m[2])"
+}
+
+# --- ANALYSIS & DISPLAY ---
+Register-ILPCommand -Name 'stats' -Pattern '^stats$' -Category 'Analysis' -Usage 'stats' -Help 'Full statistics for current events.' -Handler {
+    param($s,$m); $stats = Get-LogStatistics $s.FilteredEvents; Write-LogStats -Stats $stats -SourceFiles $s.SourceFiles -Formats @()
+}
+
+Register-ILPCommand -Name 'top-talkers' -Pattern '^top-talkers$' -Category 'Analysis' -Usage 'top-talkers' -Help 'Quick summary of top IPs, sources, event IDs.' -Handler {
+    param($s,$m); $c = $script:C; $stats = Get-LogStatistics $s.FilteredEvents; $bw = [Math]::Max(10, (Get-TerminalWidth) - 40); $hl = [string][char]0x2500
+    foreach ($sec in @(@{T='Top Source IPs';D=$stats.TopSrcIPs}, @{T='Top Dest IPs';D=$stats.TopDstIPs}, @{T='Top Sources';D=$stats.TopSources}, @{T='Top Event IDs';D=$stats.TopEventIds})) {
+        $items = @($sec.D) | Select-Object -First 5; if (-not $items -or $items.Count -eq 0) { continue }
+        Write-ColorText "$($hl*3) $($sec.T) $($hl * (40 - $sec.T.Length))" $c.BoldWhite
+        $mx = ($items | ForEach-Object { $_.Value } | Measure-Object -Maximum).Maximum; if ($mx -eq 0) { $mx = 1 }
+        foreach ($it in $items) { $b = [string][char]0x2588 * [Math]::Max(0, [int](($it.Value/$mx)*$bw)); Write-Host "  $("$($it.Key)".PadRight(20))  $($c.Cyan)$b$($c.Reset)  $(Format-Number $it.Value)" }
+        Write-Host '' }
+}
+
+Register-ILPCommand -Name 'severity' -Pattern '^severity$' -Category 'Analysis' -Usage 'severity' -Help 'Severity breakdown with bar chart.' -Handler {
+    param($s,$m); $c = $script:C; $sc = @{Critical=0;High=0;Medium=0;Low=0;Info=0}
+    foreach ($ev in $s.FilteredEvents) { if ($sc.ContainsKey($ev.Severity)) { $sc[$ev.Severity]++ } else { $sc['Info']++ } }
+    $total = $s.FilteredEvents.Count; if ($total -eq 0) { $total = 1 }
+    $mx = ($sc.Values | Measure-Object -Maximum).Maximum; if ($mx -eq 0) { $mx = 1 }; $bw = [Math]::Max(10, (Get-TerminalWidth) - 40)
+    Write-ColorText "$([string][char]0x2500*3) Severity Breakdown $([string][char]0x2500*34)" $c.BoldWhite
+    foreach ($sev in @('Critical','High','Medium','Low','Info')) { $cnt = $sc[$sev]; $pct = [Math]::Round(($cnt/$total)*100,1)
+        $b = [string][char]0x2588 * [Math]::Max(0, [int](($cnt/$mx)*$bw)); $sevC = if ($script:SevColor.ContainsKey($sev)) { $script:SevColor[$sev] } else { '' }
+        Write-Host "  $sevC$($sev.ToUpper().PadRight(10))$($c.Reset) $($c.Cyan)$b$($c.Reset)  $(Format-Number $cnt) ($pct%)" }
+}
+
+Register-ILPCommand -Name 'heatmap' -Pattern '^heatmap$' -Category 'Analysis' -Usage 'heatmap' -Help '24-hour event density grid. Red = high severity.' -Handler {
+    param($s,$m); $c = $script:C; $wt = $s.FilteredEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue }
+    if (-not $wt -or @($wt).Count -eq 0) { Write-Host 'No timestamped events.'; return }
+    $hc = @{}; $hs = @{}; for ($h=0; $h -lt 24; $h++) { $hc[$h] = 0; $hs[$h] = 0 }
+    foreach ($ev in $wt) { $h = $ev.Timestamp.Hour; $hc[$h]++; if ($ev.Severity -in @('Critical','High')) { $hs[$h]++ } }
+    $mx = ($hc.Values | Measure-Object -Maximum).Maximum; if ($mx -eq 0) { $mx = 1 }; $bw = [Math]::Max(10, (Get-TerminalWidth) - 25)
+    Write-ColorText "$([string][char]0x2500*3) 24-Hour Heatmap $([string][char]0x2500*37)" $c.BoldWhite
+    for ($h=0; $h -lt 24; $h++) { $cnt = $hc[$h]; $w = [Math]::Max(0, [int](($cnt/$mx)*$bw)); $sp = if ($cnt -gt 0) { $hs[$h]/$cnt } else { 0 }
+        $bc = if ($sp -gt 0.3) { $c.Red } else { $c.Cyan }; $bar = [string][char]0x2588 * $w
+        Write-Host "  $($c.Dim)$('{0:D2}:00' -f $h)$($c.Reset)  $bc$bar$($c.Reset)  $cnt" }
+}
+
+Register-ILPCommand -Name 'map' -Pattern '^map\s+([\w-]+)\s+->\s+([\w-]+)(:([\w-]+))?$' -Category 'Analysis' -Usage 'map <src> -> <dst[:sub]>' `
+    -Help "Connection map showing communication patterns.`nExample: map srcip -> dstip:dstport" -Handler {
+    param($s,$m); $c = $script:C; $sf = $m[1]; $df = $m[2]; $sub = $m[4]
+    $adj = [ordered]@{}
+    foreach ($ev in $s.FilteredEvents) { $sv = Get-EventFieldValue -Event $ev -Field $sf; if (-not $sv) { continue }; $sv = "$sv"
+        $dv = Get-EventFieldValue -Event $ev -Field $df; if (-not $dv) { continue }; $dv = "$dv"
+        if ($sub) { $subv = Get-EventFieldValue -Event $ev -Field $sub; if ($subv) { $dv = "$dv`:$subv" } }
+        if (-not $adj.Contains($sv)) { $adj[$sv] = @{} }; if (-not $adj[$sv].ContainsKey($dv)) { $adj[$sv][$dv] = 0 }; $adj[$sv][$dv]++ }
+    $sorted = $adj.GetEnumerator() | Sort-Object { ($_.Value.Values | Measure-Object -Sum).Sum } -Descending | Select-Object -First 20
+    Write-ColorText "$([string][char]0x2500*3) Map: $sf -> $df $([string][char]0x2500*35)" $c.BoldWhite
+    foreach ($src in $sorted) { Write-Host "$($c.BoldWhite)$($src.Key)$($c.Reset)"
+        $dests = $src.Value.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 10
+        foreach ($d in $dests) { $wm = ''; if ($s.Watchlist.ContainsKey($df) -and $s.Watchlist[$df] -contains ($d.Key -split ':')[0]) { $wm = "  $($c.BgRed)! WATCH$($c.Reset)" }
+            Write-Host "  -> $($d.Key.PadRight(25)) ($($d.Value))$wm" } }
+}
+
+Register-ILPCommand -Name 'analyze' -Pattern '^analyze\s+(.+)$' -Category 'Analysis' -Usage 'analyze <engine>' `
+    -Help "Run analysis: failed-logins, vpn-sessions, ipsec-tunnel" -Handler {
+    param($s,$m); $eng = $m[1].Trim(); $c = $script:C
+    switch -Wildcard ($eng) {
+        'failed*' { $r = Invoke-AnalyzeFailedLogins $s.FilteredEvents
+            if ($r.Count -eq 0) { Write-Host 'No failed login events.'; return }
+            Write-ColorText "$([string][char]0x2500*3) Failed Login Analysis $([string][char]0x2500*35)" $c.BoldWhite
+            Write-Host "  $($c.BoldWhite)$('User'.PadRight(30)) $('Count'.PadRight(8)) $('IPs'.PadRight(6)) $('First'.PadRight(18)) $('Last'.PadRight(18)) Sources$($c.Reset)"
+            foreach ($x in $r) { $cl = if ($x.Count -ge 10) { $c.Red } elseif ($x.Count -ge 5) { $c.Yellow } else { '' }
+                $fs = if ($x.FirstSeen -ne [datetime]::MinValue) { $x.FirstSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                $ls = if ($x.LastSeen -ne [datetime]::MinValue) { $x.LastSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
+                Write-Host "  $cl$($x.User.PadRight(30)) $($x.Count.ToString().PadRight(8)) $($x.SourceIPs.Count.ToString().PadRight(6)) $($fs.PadRight(18)) $($ls.PadRight(18)) $($x.Sources -join ', ')$($c.Reset)" } }
+        'vpn*' { $r = Invoke-AnalyzeVpnSessions $s.FilteredEvents; Write-ColorText "$([string][char]0x2500*3) VPN Session Analysis $([string][char]0x2500*35)" $c.BoldWhite
+            foreach ($uk in $r.Sessions.Keys) { foreach ($x in $r.Sessions[$uk]) { $st = if ($x.StartTime -ne [datetime]::MinValue) { $x.StartTime.ToString('yyyy-MM-dd HH:mm') } else { '' }; $et = if ($x.EndTime) { $x.EndTime.ToString('yyyy-MM-dd HH:mm') } else { '(active)' }
+                Write-Host "  $($x.User.PadRight(25)) $($st.PadRight(18)) $($et.PadRight(18)) $($x.RemoteIP)" } }
+            if ($r.ImpossibleTravel.Count -gt 0) { Write-Host ''; Write-ColorText "  IMPOSSIBLE TRAVEL ($($r.ImpossibleTravel.Count)):" $c.Red
+                foreach ($tf in $r.ImpossibleTravel) { Write-ColorText "    $($tf.User): $($tf.IP1) @ $($tf.Time1.ToString('HH:mm')) -> $($tf.IP2) @ $($tf.Time2.ToString('HH:mm')) ($($tf.MinutesBetween)m)" $c.Yellow } } }
+        'ipsec*' { $r = Invoke-AnalyzeIpsecTunnel $s.FilteredEvents; Write-ColorText "$([string][char]0x2500*3) IPsec Tunnel Analysis $([string][char]0x2500*35)" $c.BoldWhite
+            Write-Host "  Total: $($r.Summary.TotalTunnels) | Up: $($r.Summary.UpCount) | Down: $($r.Summary.DownCount) | Flaps: $($r.Summary.FlapCount)"
+            foreach ($tn in $r.Tunnels.Keys) { $t = $r.Tunnels[$tn]; $cl = if ($t.Status -eq 'Down') { $c.Red } elseif ($t.FlapCount -gt 0) { $c.Yellow } else { $c.Green }
+                Write-Host "  $cl$($t.TunnelName.PadRight(25)) $($t.Status.PadRight(8)) Flaps:$($t.FlapCount.ToString().PadRight(5)) $(if ($t.LastFailureReason) { $t.LastFailureReason } else { '-' })$($c.Reset)" } }
+        default { Write-Host "Unknown: $eng. Use: failed-logins, vpn-sessions, ipsec-tunnel" } }
+}
+
+Register-ILPCommand -Name 'report' -Pattern '^report\s+(.+)$' -Category 'Analysis' -Usage 'report <type> [--export <path>]' `
+    -Help "Generate report: summary, morning, audit, compliance, timeline" -Handler {
+    param($s,$m); $ra = $m[1].Trim(); $ep = $null
+    if ($ra -match '--export\s+(\S+)') { $ep = $Matches[1]; $ra = ($ra -replace '--export\s+\S+', '').Trim() }
+    $rd = switch -Wildcard ($ra) { 'summary*' { New-SummaryReport $s.FilteredEvents } 'morning*' { New-MorningBriefing $s.FilteredEvents } 'audit*' { New-AuditReport $s.FilteredEvents } 'compliance*' { New-ComplianceReport $s.FilteredEvents } 'timeline*' { New-TimelineReport $s.FilteredEvents } default { Write-Host "Unknown report: $ra"; $null } }
+    if ($rd) { Render-ReportToConsole $rd; if ($ep) { $fmt = if ($ep -match '\.csv$') { 'Csv' } elseif ($ep -match '\.json$') { 'Json' } else { 'Html' }; Export-Report -Path $ep -Format $fmt -ReportData $rd -Events $s.FilteredEvents } }
+}
+
+# --- ENRICHMENT ---
+Register-ILPCommand -Name 'explain' -Pattern '^explain\s+(.+)$' -Category 'Enrichment' -Usage 'explain <value>' `
+    -Help "Look up event IDs, NPS codes, FortiGate log IDs, Kerberos encryption types." -Handler {
+    param($s,$m); $c = $script:C; $val = $m[1].Trim(); $found = $false
+    # Hex -> Kerberos etype
+    if ($val -match '^0x[\da-fA-F]+$') { if ($script:KerberosEtypeLookup.ContainsKey($val.ToLower())) { Write-Host "Kerberos Encryption Type $val`: $($script:KerberosEtypeLookup[$val.ToLower()])"; $found = $true
+        if ($val -eq '0x17') { Write-ColorText "  Significance: Legacy RC4-HMAC. Consider AES migration." $c.Yellow } } }
+    # Numeric -> Event ID, NPS code, FortiGate log range
+    if ($val -match '^\d+$') { $num = [int]$val
+        if ($script:EventIdLookup.ContainsKey($num)) { Write-Host "Windows Event ID $num`: $($script:EventIdLookup[$num])"; $found = $true
+            if ($num -in @(4625,4771)) { Write-ColorText "  Significance: Brute force indicator when clustered." $c.Yellow } elseif ($num -in @(4720,4726)) { Write-ColorText "  Significance: Account lifecycle change - verify authorization." $c.Yellow } }
+        if ($script:NpsReasonLookup.ContainsKey($num)) { Write-Host "NPS Reason Code $num`: $($script:NpsReasonLookup[$num])"; $found = $true }
+        $prefix = $val.PadLeft(4, '0'); foreach ($k in $script:FortiGateLogIdRanges.Keys) { if ($prefix -like "$k*" -or $prefix -eq $k) { Write-Host "FortiGate Log Range $k`: $($script:FortiGateLogIdRanges[$k])"; $found = $true } } }
+    # subtype lookup
+    if ($val -match '/') { if ($script:FortiSubtypeLookup.ContainsKey($val)) { Write-Host "FortiGate Subtype $val`: $($script:FortiSubtypeLookup[$val])"; $found = $true } }
+    # Broad search
+    if (-not $found) { foreach ($k in $script:EventIdLookup.Keys) { if ($script:EventIdLookup[$k] -like "*$val*") { Write-Host "  Event $k`: $($script:EventIdLookup[$k])"; $found = $true } }
+        foreach ($k in $script:NpsReasonLookup.Keys) { if ($script:NpsReasonLookup[$k] -like "*$val*") { Write-Host "  NPS $k`: $($script:NpsReasonLookup[$k])"; $found = $true } } }
+    if (-not $found) { Write-Host "No match for '$val'" }
+}
+
+Register-ILPCommand -Name 'ioc' -Pattern '^ioc(\s+(.+))?$' -Category 'Enrichment' -Usage 'ioc import|match|export' `
+    -Help "ioc import <path> -- Load IOCs from file`nioc match -- Scan events against loaded IOCs`nioc export <path> -- Export matches" -Handler {
+    param($s,$m); $args2 = if ($m[2]) { $m[2].Trim() } else { '' }
+    if ($args2 -match '^import\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); if (-not (Test-Path $p)) { Write-Host "File not found: $p"; return }
+        $lines = Get-Content $p | Where-Object { $_ -and $_.Trim() -and -not $_.StartsWith('#') }; $iocSet = @{}
+        foreach ($l in $lines) { $parts = $l -split ',',2; $iocSet[$parts[0].Trim()] = if ($parts.Count -gt 1) { $parts[1].Trim() } else { 'unknown' } }
+        $vn = "_ioc_$(Split-Path $p -Leaf)"; $s.Variables[$vn] = $iocSet; Write-Host "Loaded $($iocSet.Count) IOCs as `$$vn" }
+    elseif ($args2 -eq 'match') { $allIocs = @{}; foreach ($vk in $s.Variables.Keys) { if ($vk -like '_ioc_*' -and $s.Variables[$vk] -is [hashtable]) { foreach ($ik in $s.Variables[$vk].Keys) { $allIocs[$ik] = $s.Variables[$vk][$ik] } } }
+        if ($allIocs.Count -eq 0) { Write-Host 'No IOCs loaded. Use: ioc import <path>'; return }
+        $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+        $hits = [System.Collections.Generic.List[object]]::new(); $matched = @{}
+        foreach ($ev in $s.FilteredEvents) { $rl = "$($ev.Severity) $($ev.Source) $($ev.Message) $($ev.RawLine)"
+            foreach ($ioc in $allIocs.Keys) { if ($rl.IndexOf($ioc, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hits.Add($ev); $matched[$ioc] = ($matched[$ioc] ?? 0) + 1; break } } }
+        $s.FilteredEvents = $hits; $s.ActiveFilter = 'ioc:match'; $s.PageIndex = 0
+        Write-Host "$(Format-Number $hits.Count) events matched $($matched.Count)/$($allIocs.Count) IOCs"
+        foreach ($mk in ($matched.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 10)) { Write-Host "  $($mk.Key): $($mk.Value) hits" } }
+    elseif ($args2 -match '^export\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); $rd = New-SummaryReport $s.FilteredEvents; Export-Report -Path $p -Format 'Csv' -ReportData $rd -Events $s.FilteredEvents; Write-Host "Exported to $p" }
+    else { Write-Host 'Usage: ioc import <path> | ioc match | ioc export <path>' }
+}
+
+Register-ILPCommand -Name 'policy' -Pattern '^policy\s+(\d+)$' -Category 'Enrichment' -Usage 'policy <id>' `
+    -Help "Look up FortiGate policy by ID (requires loaded config)." -Handler {
+    param($s,$m); $pid2 = $m[1]
+    $policyEvents = $s.AllEvents | Where-Object { $_.Extra.ContainsKey('policyid') -and $_.Extra['policyid'] -eq $pid2 }
+    if (@($policyEvents).Count -eq 0) { Write-Host "No events reference policy $pid2"; return }
+    $sample = $policyEvents | Select-Object -First 1; $c = $script:C
+    Write-ColorText "$([string][char]0x2500*3) Policy $pid2 $([string][char]0x2500*45)" $c.BoldWhite
+    foreach ($k in @('srcintf','dstintf','srcip','dstip','service','action','logtraffic')) { $v = $sample.Extra[$k]; if ($v) { Write-Host "  $($k.PadRight(14)) $v" } }
+    Write-Host "  Events       $(Format-Number @($policyEvents).Count)"
+}
+
+Register-ILPCommand -Name 'policy-stats' -Pattern '^policy-stats$' -Category 'Enrichment' -Usage 'policy-stats' `
+    -Help "Group events by policy ID with counts." -Handler {
+    param($s,$m); $c = $script:C; $pc = @{}
+    foreach ($ev in $s.FilteredEvents) { $pid2 = $ev.Extra['policyid']; if ($pid2) { if (-not $pc.ContainsKey($pid2)) { $pc[$pid2] = 0 }; $pc[$pid2]++ } }
+    if ($pc.Count -eq 0) { Write-Host 'No policyid field found in events.'; return }
+    $sorted = $pc.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 15
+    $mx = ($sorted | Select-Object -First 1).Value; $bw = [Math]::Max(10, (Get-TerminalWidth) - 35)
+    Write-ColorText "$([string][char]0x2500*3) Policy Stats $([string][char]0x2500*40)" $c.BoldWhite
+    foreach ($e in $sorted) { $b = [string][char]0x2588 * [Math]::Max(0, [int](($e.Value/$mx)*$bw)); Write-Host "  Policy $($e.Key.PadRight(8))  $($c.Cyan)$b$($c.Reset)  $(Format-Number $e.Value)" }
+}
+
+# --- DATA MANAGEMENT ---
+Register-ILPCommand -Name 'load' -Pattern '^load\s+(.+)$' -Category 'Data' -Usage 'load <file>' -Help 'Load additional log file.' -Handler {
+    param($s,$m); $lp = $m[1].Trim('"',"'"); if (-not (Test-Path $lp)) { Write-Host "File not found: $lp"; return }
+    $fmt = Invoke-DetectLogFormat $lp; if (-not $fmt) { Write-Host "Unknown format: $lp"; return }
+    $ne = Invoke-ParseLogFile -FilePath $lp -Format $fmt -SourceFile $lp
+    if ($null -ne $ne) { Add-EventsToList $s.AllEvents $ne; $s.AllEvents = [System.Collections.Generic.List[object]]($s.AllEvents | Sort-Object Timestamp)
+        $s.FilteredEvents = $s.AllEvents; $s.ActiveFilter = ''; $s.SourceFiles += $lp
+        Write-Host "Loaded $(Format-Number $ne.Count) events from $lp ($fmt). Total: $(Format-Number $s.AllEvents.Count)" }
+}
+
+Register-ILPCommand -Name 'sources' -Pattern '^sources$' -Category 'Data' -Usage 'sources' -Help 'List loaded sources.' -Handler {
+    param($s,$m); $g = @{}; foreach ($e in $s.AllEvents) { $sf = if ($e.SourceFile) { $e.SourceFile } else { '(unknown)' }; if (-not $g.ContainsKey($sf)) { $g[$sf] = @{Format=$e.SourceFormat;Count=0} }; $g[$sf].Count++ }
+    $i = 1; foreach ($sf in $g.Keys) { Write-Host "  $i. $($sf.PadRight(25)) $($g[$sf].Format.PadRight(20)) $(Format-Number $g[$sf].Count) events"; $i++ }
+}
+
+Register-ILPCommand -Name 'fields' -Pattern '^fields$' -Category 'Data' -Usage 'fields' -Help 'List available fields.' -Handler {
+    param($s,$m); $af = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    @('Timestamp','Severity','Source','Message','SourceFile','SourceFormat') | ForEach-Object { $af.Add($_) | Out-Null }
+    foreach ($e in $s.AllEvents) { foreach ($k in $e.Extra.Keys) { $af.Add($k) | Out-Null } }
+    Write-Host "Available fields: $($af -join ', ')"
+}
+
+Register-ILPCommand -Name 'export' -Pattern '^export\s+(\w+)\s+(.+)$' -Category 'Data' -Usage 'export <fmt> <path>' -Help 'Export events: csv, json, html' -Handler {
+    param($s,$m); $fmt = $m[1]; $p = $m[2].Trim('"',"'")
+    $ef = switch ($fmt.ToLower()) { 'csv' { 'Csv' } 'json' { 'Json' } 'html' { 'Html' } default { 'Csv' } }
+    $rd = New-SummaryReport $s.FilteredEvents; Export-Report -Path $p -Format $ef -ReportData $rd -Events $s.FilteredEvents
+}
+
+Register-ILPCommand -Name 'clear' -Pattern '^clear$' -Category 'Data' -Usage 'clear' -Help 'Clear active filter.' -Handler {
+    param($s,$m); $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $s.FilteredEvents = $s.AllEvents; $s.ActiveFilter = ''; $s.PageIndex = 0; Write-Host 'Filter cleared.'
+    if ($s.PinnedEvents.Count -gt 0) { Write-Host "$($script:C.Dim)($($s.PinnedEvents.Count) pinned events available)$($script:C.Reset)" }
+}
+
+Register-ILPCommand -Name 'undo' -Pattern '^undo$' -Category 'Data' -Usage 'undo' -Help 'Restore previous filter state.' -Handler {
+    param($s,$m); if ($s.FilterHistory.Count -eq 0) { Write-Host 'Nothing to undo.'; return }
+    $prev = $s.FilterHistory[$s.FilterHistory.Count - 1]; $s.FilterHistory.RemoveAt($s.FilterHistory.Count - 1)
+    $s.FilteredEvents = $prev.Events; $s.ActiveFilter = $prev.Filter; $s.PageIndex = 0
+    Write-Host "Restored. $(Format-Number $s.FilteredEvents.Count) events$(if ($s.ActiveFilter) { " ($($s.ActiveFilter))" })"
+}
+
+# --- SESSION ---
+Register-ILPCommand -Name 'history' -Pattern '^history$' -Category 'Session' -Usage 'history' -Help 'Show last 30 commands. Use !N to re-run.' -Handler {
+    param($s,$m); $c = $script:C; $cnt = [Math]::Min(30, $s.CommandHistory.Count); $st = $s.CommandHistory.Count - $cnt
+    for ($i = $st; $i -lt $s.CommandHistory.Count; $i++) { Write-Host "  $($c.Dim)$($i+1).$($c.Reset) $($s.CommandHistory[$i])" }
+}
+
+Register-ILPCommand -Name 'alias-set' -Pattern '^alias\s+(\S+)\s+(.+)$' -Category 'Session' -Usage 'alias <name> <query>' -Help 'Create query alias.' -Handler {
+    param($s,$m); $s.Aliases[$m[1]] = $m[2]; Write-Host "Alias '$($m[1])' -> '$($m[2])'"
+}
+Register-ILPCommand -Name 'alias-list' -Pattern '^alias$' -Category 'Session' -Usage 'alias' -Help 'List aliases.' -Handler {
+    param($s,$m); $c = $script:C; if ($s.Aliases.Count -eq 0) { Write-Host 'No aliases.' } else { foreach ($a in $s.Aliases.GetEnumerator()) { Write-Host "  $($c.Cyan)$($a.Key)$($c.Reset) -> $($a.Value)" } }
+}
+
+Register-ILPCommand -Name 'pin' -Pattern '^pin$' -Category 'Session' -Usage 'pin' -Help 'Save current results as pinned.' -Handler {
+    param($s,$m); $s.PinnedEvents = [System.Collections.Generic.List[object]]::new($s.FilteredEvents); Write-Host "Pinned $(Format-Number $s.PinnedEvents.Count) events."
+}
+Register-ILPCommand -Name 'unpin' -Pattern '^unpin$' -Category 'Session' -Usage 'unpin' -Help 'Clear pinned events.' -Handler { param($s,$m); $s.PinnedEvents = [System.Collections.Generic.List[object]]::new(); Write-Host 'Pins cleared.' }
+Register-ILPCommand -Name 'pinned' -Pattern '^pinned$' -Category 'Session' -Usage 'pinned' -Help 'Switch to pinned events.' -Handler {
+    param($s,$m); if ($s.PinnedEvents.Count -eq 0) { Write-Host 'No pinned events.'; return }
+    $s.FilterHistory.Add(@{ Filter = $s.ActiveFilter; Events = $s.FilteredEvents })
+    $s.FilteredEvents = [System.Collections.Generic.List[object]]::new($s.PinnedEvents); $s.ActiveFilter = 'pinned'; $s.PageIndex = 0
+    Write-Host "Switched to $(Format-Number $s.PinnedEvents.Count) pinned events"
+}
+
+Register-ILPCommand -Name 'columns' -Pattern '^columns\s+(.+)$' -Category 'Session' -Usage 'columns <fields> | reset' -Help "Set display columns.`nExample: columns Timestamp,srcip,dstip,action,Message" -Handler {
+    param($s,$m); $arg = $m[1].Trim(); if ($arg -eq 'reset') { $s.DisplayColumns = @(); Write-Host 'Columns reset.' } else { $s.DisplayColumns = ($arg -split ',') | ForEach-Object { $_.Trim() }; Write-Host "Columns: $($s.DisplayColumns -join ', ')" }
+}
+Register-ILPCommand -Name 'width' -Pattern '^width\s+([\w-]+)\s+(\d+)$' -Category 'Session' -Usage 'width <field> <N>' -Help 'Set column width.' -Handler {
+    param($s,$m); $script:SessionFieldWidths[$m[1]] = [int]$m[2]; Write-Host "Width '$($m[1])' = $($m[2])"
+}
+Register-ILPCommand -Name 'output' -Pattern '^output\s+(\w+)$' -Category 'Session' -Usage 'output <Grid|Table|List>' -Help 'Set display format.' -Handler {
+    param($s,$m); $f = $m[1]; if ($f -in @('Grid','Table','List')) { $s.OutputFormat = $f; Write-Host "Output: $f" } else { Write-Host 'Use: Grid, Table, List' }
+}
+
+# --- JOURNAL ---
+Register-ILPCommand -Name 'note' -Pattern '^note\s+"?(.+?)"?\s*$' -Category 'Journal' -Usage 'note "<text>"' -Help 'Add analyst note to investigation journal.' -Handler {
+    param($s,$m); $s.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command=''; Summary=$m[1]; Type='note' })
+    Write-Host "Note added: $($m[1])"
+}
+
+Register-ILPCommand -Name 'journal' -Pattern '^journal(\s+export\s+(.+))?$' -Category 'Journal' -Usage 'journal [export <path>]' `
+    -Help "Show or export investigation journal as markdown." -Handler {
+    param($s,$m); $c = $script:C; $ep = $m[2]
+    if ($ep) { $ep = $ep.Trim('"',"'"); $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine("# Investigation Journal"); [void]$sb.AppendLine("**Started:** $($s.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))")
+        [void]$sb.AppendLine("**Duration:** $([Math]::Round(([datetime]::Now - $s.StartTime).TotalMinutes)) minutes")
+        [void]$sb.AppendLine("**Events loaded:** $(Format-Number $s.AllEvents.Count) from $($s.SourceFiles.Count) files"); [void]$sb.AppendLine("`n## Timeline")
+        foreach ($j in $s.Journal) { $ts = $j.Timestamp.ToString('HH:mm:ss')
+            $line = switch ($j.Type) { 'note' { "- **$ts** [NOTE] $($j.Summary)" } 'bookmark' { "- **$ts** [BOOKMARK] $($j.Summary)" } default { "- **$ts** ``$($j.Command)`` -- $($j.Summary)" } }
+            [void]$sb.AppendLine($line) }
+        [System.IO.File]::WriteAllText($ep, $sb.ToString()); Write-Host "Journal exported to $ep" }
+    else { if ($s.Journal.Count -eq 0) { Write-Host 'Journal is empty.'; return }
+        Write-ColorText "$([string][char]0x2500*3) Investigation Journal $([string][char]0x2500*32)" $c.BoldWhite
+        Write-Host "  Started: $($s.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))  Duration: $([Math]::Round(([datetime]::Now - $s.StartTime).TotalMinutes))min"
+        foreach ($j in $s.Journal) { $icon = switch ($j.Type) { 'note' { "$($c.Yellow)[N]$($c.Reset)" } 'bookmark' { "$($c.Cyan)[B]$($c.Reset)" } default { "$($c.Dim)[C]$($c.Reset)" } }
+            Write-Host "  $($c.Dim)$($j.Timestamp.ToString('HH:mm:ss'))$($c.Reset) $icon $(if ($j.Command) { $j.Command } else { $j.Summary })" } }
+}
+
+# --- BOOKMARKS ---
+Register-ILPCommand -Name 'bookmark' -Pattern '^bookmark\s+(\d+)(\s+"?(.+?)"?)?$' -Category 'Bookmarks' -Usage 'bookmark <N> ["note"]' -Help 'Tag event #N with a note.' -Handler {
+    param($s,$m); $idx = [int]$m[1] - 1; $note = if ($m[3]) { $m[3] } else { '' }
+    if ($idx -lt 0 -or $idx -ge $s.FilteredEvents.Count) { Write-Host "Out of range (1-$($s.FilteredEvents.Count))"; return }
+    $s.Bookmarks.Add([PSCustomObject]@{ EventRef=$s.FilteredEvents[$idx]; Index=[int]$m[1]; Note=$note; Timestamp=[datetime]::Now })
+    $s.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command="bookmark $($m[1])"; Summary="Bookmarked event #$($m[1]): $note"; Type='bookmark' })
+    Write-Host "Bookmarked event #$($m[1])$(if ($note) { ": $note" })"
+}
+
+Register-ILPCommand -Name 'bookmarks' -Pattern '^bookmarks(\s+(.+))?$' -Category 'Bookmarks' -Usage 'bookmarks [show|export <path>|clear]' `
+    -Help "List, show, export, or clear bookmarks." -Handler {
+    param($s,$m); $c = $script:C; $sub = if ($m[2]) { $m[2].Trim() } else { '' }
+    if ($sub -eq 'clear') { $s.Bookmarks = [System.Collections.Generic.List[object]]::new(); Write-Host 'Bookmarks cleared.' }
+    elseif ($sub -eq 'show') { foreach ($bm in $s.Bookmarks) { Write-Host ''; & ($script:ILPCommands['show'].Handler) $s @{1="$($bm.Index)"} } }
+    elseif ($sub -match '^export\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); $lines = @('Index,Timestamp,Severity,Source,Message,Note')
+        foreach ($bm in $s.Bookmarks) { $ev = $bm.EventRef; $lines += "$($bm.Index),`"$($ev.Timestamp)`",`"$($ev.Severity)`",`"$($ev.Source)`",`"$($ev.Message -replace '"','""')`",`"$($bm.Note)`"" }
+        [System.IO.File]::WriteAllLines($p, $lines); Write-Host "Exported $($s.Bookmarks.Count) bookmarks to $p" }
+    elseif ($sub -eq '' -or $sub -eq 'list') { if ($s.Bookmarks.Count -eq 0) { Write-Host 'No bookmarks.'; return }
+        Write-ColorText "$([string][char]0x2500*3) Bookmarks ($($s.Bookmarks.Count)) $([string][char]0x2500*35)" $c.BoldWhite
+        foreach ($bm in $s.Bookmarks) { $ev = $bm.EventRef; $ts = if ($ev.Timestamp -ne [datetime]::MinValue) { $ev.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
+            Write-Host "  $($c.Cyan)#$($bm.Index)$($c.Reset)  $ts  $($ev.Severity.PadRight(8))  $($ev.Message.Substring(0, [Math]::Min(50, $ev.Message.Length)))$(if ($bm.Note) { "  $($c.Yellow)[$($bm.Note)]$($c.Reset)" })" } }
+    else { Write-Host 'Usage: bookmarks [show|export <path>|clear]' }
+}
+
+# --- WATCHLIST ---
+Register-ILPCommand -Name 'watch' -Pattern '^watch(\s+(.+))?$' -Category 'Watchlist' -Usage 'watch <field> <val,...> | remove | clear' `
+    -Help "watch srcip 10.0.1.5,10.0.1.8 -- Add to watchlist`nwatch remove srcip [val] -- Remove`nwatch clear -- Clear all" -Handler {
+    param($s,$m); $c = $script:C; $args2 = if ($m[2]) { $m[2].Trim() } else { '' }
+    if ($args2 -eq 'clear') { $s.Watchlist = @{}; Write-Host 'Watchlist cleared.' }
+    elseif ($args2 -match '^remove\s+([\w-]+)(\s+(.+))?$') { $f = $Matches[1]; $v = $Matches[3]
+        if ($v -and $s.Watchlist.ContainsKey($f)) { $s.Watchlist[$f] = @($s.Watchlist[$f] | Where-Object { $_ -ne $v }) } elseif ($s.Watchlist.ContainsKey($f)) { $s.Watchlist.Remove($f) }
+        Write-Host "Removed from watchlist." }
+    elseif ($args2 -match '^([\w-]+)\s+(.+)$') { $f = $Matches[1]; $vals = ($Matches[2] -split ',') | ForEach-Object { $_.Trim() }
+        if (-not $s.Watchlist.ContainsKey($f)) { $s.Watchlist[$f] = @() }; $s.Watchlist[$f] = @($s.Watchlist[$f]) + $vals
+        Write-Host "Watching $f`: $($vals -join ', ')" }
+    else { if ($s.Watchlist.Count -eq 0) { Write-Host 'Watchlist empty.' } else {
+        Write-ColorText "$([string][char]0x2500*3) Watchlist $([string][char]0x2500*44)" $c.BoldWhite
+        foreach ($wk in $s.Watchlist.Keys) { Write-Host "  $($c.Cyan)$wk$($c.Reset): $($s.Watchlist[$wk] -join ', ')" } } }
+}
+
+# --- VARIABLES ---
+Register-ILPCommand -Name 'var-set' -Pattern '^\$(\w+)\s*=\s*select\s+([\w-]+)$' -Category 'Variables' -Usage '$name = select <field>' `
+    -Help "Capture unique field values into a named variable." -Handler {
+    param($s,$m); $vn = $m[1]; $vf = $m[2]; $vals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($ev in $s.FilteredEvents) { $v = Get-EventFieldValue -Event $ev -Field $vf; if ($v) { $vals.Add("$v") | Out-Null } }
+    $s.Variables[$vn] = @($vals); Write-Host "`$$vn = $($vals.Count) unique $vf values$(if ($vals.Count -le 5) { ": $($vals -join ', ')" } else { " (first 5: $($vals | Select-Object -First 5 | ForEach-Object { $_ }) ...)" })"
+}
+Register-ILPCommand -Name 'var-show' -Pattern '^\$(\w+)$' -Category 'Variables' -Usage '$name' -Help 'Print variable contents.' -Handler {
+    param($s,$m); $vn = $m[1]; if (-not $s.Variables.ContainsKey($vn)) { Write-Host "Variable `$$vn not defined."; return }
+    $v = $s.Variables[$vn]; if ($v -is [hashtable]) { Write-Host "`$$vn ($($v.Count) entries)"; foreach ($k in ($v.Keys | Select-Object -First 10)) { Write-Host "  $k = $($v[$k])" } }
+    else { Write-Host "`$$vn ($(@($v).Count) values)"; foreach ($val in ($v | Select-Object -First 20)) { Write-Host "  $val" } }
+}
+Register-ILPCommand -Name 'vars' -Pattern '^vars$' -Category 'Variables' -Usage 'vars' -Help 'List all variables.' -Handler {
+    param($s,$m); if ($s.Variables.Count -eq 0) { Write-Host 'No variables.' } else { foreach ($vk in $s.Variables.Keys) { $v = $s.Variables[$vk]; $cnt = if ($v -is [hashtable]) { $v.Count } else { @($v).Count }; Write-Host "  `$$vk ($cnt values)" } }
+}
+
+# --- EVIDENCE ---
+Register-ILPCommand -Name 'evidence' -Pattern '^evidence(\s+(.+))?$' -Category 'Compliance' -Usage 'evidence start|capture|finish|export|list' `
+    -Help "evidence start `"AC-2`" -- Begin collection`nevidence capture `"desc`" -- Snapshot current state`nevidence finish -- Close collection`nevidence export <path> -- Export as HTML`nevidence list -- Show collections" -Handler {
+    param($s,$m); $c = $script:C; $args2 = if ($m[2]) { $m[2].Trim() } else { '' }
+    if ($args2 -match '^start\s+"?(.+?)"?\s*$') { $s._EvidenceCtx = @{ ControlId=$Matches[1]; StartTime=[datetime]::Now; Captures=[System.Collections.Generic.List[object]]::new() }
+        Write-Host "Evidence collection started for: $($Matches[1])" }
+    elseif ($args2 -match '^capture\s+"?(.+?)"?\s*$') { if (-not $s._EvidenceCtx) { Write-Host 'No active evidence collection. Use: evidence start "control"'; return }
+        $sc = @{Critical=0;High=0;Medium=0;Low=0;Info=0}; foreach ($ev in $s.FilteredEvents) { if ($sc.ContainsKey($ev.Severity)) { $sc[$ev.Severity]++ } }
+        $cap = @{ Description=$Matches[1]; Filter=$s.ActiveFilter; EventCount=$s.FilteredEvents.Count; SeverityCounts=$sc; Timestamp=[datetime]::Now
+            TimeRange=@{ Min=($s.FilteredEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp } | Measure-Object -Minimum -ErrorAction SilentlyContinue).Minimum
+                         Max=($s.FilteredEvents | Where-Object { $_.Timestamp -ne [datetime]::MinValue } | ForEach-Object { $_.Timestamp } | Measure-Object -Maximum -ErrorAction SilentlyContinue).Maximum }
+            SampleEvents=@($s.FilteredEvents | Select-Object -First 10) }
+        $s._EvidenceCtx.Captures.Add($cap); Write-Host "Captured: $($Matches[1]) ($($cap.EventCount) events)"
+        $s.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command="evidence capture"; Summary="Evidence: $($Matches[1]) ($($cap.EventCount) events)"; Type='command' }) }
+    elseif ($args2 -eq 'finish') { if (-not $s._EvidenceCtx) { Write-Host 'No active evidence collection.'; return }
+        if (-not $s._EvidenceCollections) { $s | Add-Member -NotePropertyName '_EvidenceCollections' -NotePropertyValue ([System.Collections.Generic.List[object]]::new()) -ErrorAction SilentlyContinue }
+        $s._EvidenceCollections.Add($s._EvidenceCtx); Write-Host "Evidence collection '$($s._EvidenceCtx.ControlId)' finished with $($s._EvidenceCtx.Captures.Count) captures."; $s._EvidenceCtx = $null }
+    elseif ($args2 -match '^export\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Evidence Collection</title><style>body{font-family:sans-serif;max-width:800px;margin:auto;padding:20px}h2{color:#0078d4;border-bottom:2px solid #0078d4}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background:#f0f4f8}</style></head><body>')
+        $colls = @(); if ($s._EvidenceCtx) { $colls += $s._EvidenceCtx }; if ($s._EvidenceCollections) { $colls += $s._EvidenceCollections }
+        foreach ($ec in $colls) { [void]$sb.AppendLine("<h2>Control: $($ec.ControlId)</h2><p>Collected: $($ec.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))</p>")
+            $ci = 1; foreach ($cap in $ec.Captures) { [void]$sb.AppendLine("<h3>Capture $ci`: $($cap.Description)</h3><p>Filter: <code>$($cap.Filter)</code><br>Events: $($cap.EventCount)<br>Severity: C:$($cap.SeverityCounts.Critical) H:$($cap.SeverityCounts.High) M:$($cap.SeverityCounts.Medium) L:$($cap.SeverityCounts.Low) I:$($cap.SeverityCounts.Info)</p>")
+                if ($cap.SampleEvents.Count -gt 0) { [void]$sb.AppendLine('<table><tr><th>Timestamp</th><th>Severity</th><th>Source</th><th>Message</th></tr>')
+                    foreach ($ev in $cap.SampleEvents) { [void]$sb.AppendLine("<tr><td>$($ev.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))</td><td>$($ev.Severity)</td><td>$($ev.Source)</td><td>$([System.Web.HttpUtility]::HtmlEncode($ev.Message))</td></tr>") }
+                    [void]$sb.AppendLine('</table>') }; $ci++ } }
+        [void]$sb.AppendLine('</body></html>'); [System.IO.File]::WriteAllText($p, $sb.ToString()); Write-Host "Evidence exported to $p" }
+    elseif ($args2 -eq 'list') { $colls = @(); if ($s._EvidenceCtx) { $colls += $s._EvidenceCtx }; if ($s._EvidenceCollections) { $colls += $s._EvidenceCollections }
+        if ($colls.Count -eq 0) { Write-Host 'No evidence collections.' } else { foreach ($ec in $colls) { $st = if ($s._EvidenceCtx -eq $ec) { ' (active)' } else { '' }
+            Write-Host "  $($c.Cyan)$($ec.ControlId)$($c.Reset)$st  $($ec.Captures.Count) captures  $($ec.StartTime.ToString('yyyy-MM-dd HH:mm'))" } } }
+    else { Write-Host 'Usage: evidence start "control" | capture "desc" | finish | export <path> | list' }
+}
+
+# --- PLAYBOOKS ---
+Register-ILPCommand -Name 'playbook' -Pattern '^playbook(\s+(.+))?$' -Category 'Compliance' -Usage 'playbook list|run <name>|create <name>' `
+    -Help "playbook list -- Show available playbooks`nplaybook run <name> -- Execute playbook`nplaybook create <name> -- Save history as playbook" -Handler {
+    param($s,$m); $c = $script:C; $args2 = if ($m[2]) { $m[2].Trim() } else { '' }
+    $pbDirs = @($PSScriptRoot, (Join-Path $HOME '.ilp/playbooks'), (Get-Location).Path) | Where-Object { $_ -and (Test-Path $_) }
+    if ($args2 -eq 'list' -or $args2 -eq '') { $found = @(); foreach ($d in $pbDirs) { $found += Get-ChildItem $d -Filter '*.ilp-playbook' -ErrorAction SilentlyContinue }
+        if ($found.Count -eq 0) { Write-Host 'No playbooks found.' } else { Write-ColorText "$([string][char]0x2500*3) Playbooks $([string][char]0x2500*43)" $c.BoldWhite
+            foreach ($f in $found) { $desc = (Get-Content $f.FullName -TotalCount 1) -replace '^#\s*',''; $lines = @(Get-Content $f.FullName | Where-Object { $_ -and -not $_.StartsWith('#') -and $_ -notmatch '^---' }).Count
+                Write-Host "  $($c.Cyan)$($f.BaseName)$($c.Reset)  $desc  ($lines commands)" } } }
+    elseif ($args2 -match '^run\s+(.+)$') { $name = $Matches[1].Trim('"',"'"); $pbFile = $null
+        foreach ($d in $pbDirs) { $p = Join-Path $d "$name.ilp-playbook"; if (Test-Path $p) { $pbFile = $p; break }; $p = Join-Path $d $name; if (Test-Path $p) { $pbFile = $p; break } }
+        if (-not $pbFile) { Write-Host "Playbook not found: $name"; return }
+        $lines = Get-Content $pbFile; Write-ColorText "$([string][char]0x2500*3) Running: $name $([string][char]0x2500*35)" $c.BoldWhite
+        $s.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command="playbook run $name"; Summary="Started playbook: $name"; Type='command' })
+        foreach ($line in $lines) { $line = $line.Trim()
+            if (-not $line -or $line.StartsWith('#')) { if ($line.StartsWith('#')) { Write-ColorText "  $line" $c.Dim }; continue }
+            if ($line -match '^---\s*pause\s*(.*?)\s*---$') { $label = $Matches[1]; if ($label) { Write-ColorText "`n  >> $label" $c.BoldWhite }
+                Write-Host '  [Enter] continue | [s] skip | [q] quit: ' -NoNewline; $key = Read-Host
+                if ($key -eq 'q') { Write-Host 'Playbook stopped.'; return }; if ($key -eq 's') { $skip = $true; continue }; continue }
+            $line = $line -replace '\{date\}', (Get-Date -Format 'yyyy-MM-dd') -replace '\{datetime\}', (Get-Date -Format 'yyyy-MM-dd_HHmmss')
+            Write-Host "$($c.Dim)> $line$($c.Reset)"; $s._PlaybookInput = $line; $s._RunPlaybookCmd = $true } }
+    elseif ($args2 -match '^create\s+(.+)$') { $name = $Matches[1].Trim('"',"'"); $dir = Join-Path $HOME '.ilp/playbooks'
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $p = Join-Path $dir "$name.ilp-playbook"; $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine("# $name"); [void]$sb.AppendLine("# Created $(Get-Date -Format 'yyyy-MM-dd HH:mm')"); [void]$sb.AppendLine('')
+        foreach ($cmd in $s.CommandHistory) { if ($cmd -in @('exit','quit','history','help')) { continue }; [void]$sb.AppendLine($cmd) }
+        [System.IO.File]::WriteAllText($p, $sb.ToString()); Write-Host "Playbook saved to $p ($($s.CommandHistory.Count) commands)" }
+    else { Write-Host 'Usage: playbook list | run <name> | create <name>' }
+}
+
+# --- SESSION PERSISTENCE ---
+Register-ILPCommand -Name 'session' -Pattern '^session(\s+(.+))?$' -Category 'Session' -Usage 'session save|restore|list' `
+    -Help "session save <path> -- Save session state`nsession restore <path> -- Restore session`nsession list -- List saved sessions" -Handler {
+    param($s,$m); $args2 = if ($m[2]) { $m[2].Trim() } else { '' }
+    if ($args2 -match '^save\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); $state = @{
+        SourceFiles = $s.SourceFiles; ActiveFilter = $s.ActiveFilter; CommandHistory = @($s.CommandHistory)
+        Aliases = $s.Aliases; Watchlist = $s.Watchlist; Variables = @{}; DisplayColumns = $s.DisplayColumns
+        OutputFormat = $s.OutputFormat; FieldWidths = $s.FieldWidths; Highlight = $s.Highlight
+        Bookmarks = @($s.Bookmarks | ForEach-Object { @{ Index=$_.Index; Note=$_.Note } })
+        Journal = @($s.Journal | ForEach-Object { @{ Timestamp=$_.Timestamp.ToString('o'); Command=$_.Command; Summary=$_.Summary; Type=$_.Type } }) }
+        foreach ($vk in $s.Variables.Keys) { if ($s.Variables[$vk] -is [hashtable]) { $state.Variables[$vk] = $s.Variables[$vk] } else { $state.Variables[$vk] = @($s.Variables[$vk]) } }
+        $state | ConvertTo-Json -Depth 5 | Set-Content $p; Write-Host "Session saved to $p" }
+    elseif ($args2 -match '^restore\s+(.+)$') { $p = $Matches[1].Trim('"',"'"); if (-not (Test-Path $p)) { Write-Host "Not found: $p"; return }
+        try { $state = Get-Content $p -Raw | ConvertFrom-Json
+            if ($state.Aliases) { foreach ($prop in $state.Aliases.PSObject.Properties) { $s.Aliases[$prop.Name] = $prop.Value } }
+            if ($state.Watchlist) { foreach ($prop in $state.Watchlist.PSObject.Properties) { $s.Watchlist[$prop.Name] = @($prop.Value) } }
+            if ($state.DisplayColumns) { $s.DisplayColumns = @($state.DisplayColumns) }
+            if ($state.OutputFormat) { $s.OutputFormat = $state.OutputFormat }
+            if ($state.Highlight) { $s.Highlight = $state.Highlight }
+            if ($state.CommandHistory) { foreach ($cmd in $state.CommandHistory) { $s.CommandHistory.Add($cmd) } }
+            Write-Host "Session restored from $p ($(if ($state.Aliases) { $state.Aliases.PSObject.Properties.Count } else { 0 }) aliases, $(if ($state.Watchlist) { $state.Watchlist.PSObject.Properties.Count } else { 0 }) watchlists)" }
+        catch { Write-Host "Error restoring: $_" } }
+    elseif ($args2 -eq 'list' -or $args2 -eq '') { $dirs = @((Get-Location).Path, (Join-Path $HOME '.ilp/sessions'))
+        $files = @(); foreach ($d in $dirs) { if (Test-Path $d) { $files += Get-ChildItem $d -Filter '*.ilp-session' -ErrorAction SilentlyContinue } }
+        if ($files.Count -eq 0) { Write-Host 'No saved sessions.' } else { foreach ($f in $files) { Write-Host "  $($f.Name)  $($f.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))  $('{0:N0}' -f ($f.Length / 1KB))KB" } } }
+    else { Write-Host 'Usage: session save <path> | restore <path> | list' }
+}
+
+# --- COPY ---
+Register-ILPCommand -Name 'copy' -Pattern '^copy(\s+(\d+))?$' -Category 'Data' -Usage 'copy [N]' -Help 'Copy events or event #N to clipboard.' -Handler {
+    param($s,$m); $idx = $m[2]
+    if ($idx) { $i = [int]$idx - 1; if ($i -lt 0 -or $i -ge $s.FilteredEvents.Count) { Write-Host "Out of range."; return }
+        $ev = $s.FilteredEvents[$i]; $text = "$($ev.Timestamp) $($ev.Severity) $($ev.Source) $($ev.Message)"; Set-Clipboard $text; Write-Host "Event #$idx copied." }
+    else { $text = ($s.FilteredEvents | ForEach-Object { "$($_.Timestamp) $($_.Severity) $($_.Source) $($_.Message)" }) -join "`n"
+        Set-Clipboard $text; Write-Host "$(Format-Number $s.FilteredEvents.Count) events copied." }
+}
+
+# ============================================================================
+# Start-InteractiveMode (REPL)
+# ============================================================================
+
 function Start-InteractiveMode {
     param([System.Collections.Generic.List[object]]$Events, [string[]]$LoadedFiles, [string[]]$LoadedFormats)
     $c = $script:C
+    $script:SessionFieldWidths = @{}
+
+    # --- A4: Load config ---
+    $config = Import-ILPConfig
+
+    # --- A2: Session object ---
+    $session = [PSCustomObject]@{
+        AllEvents       = $Events
+        FilteredEvents  = $Events
+        ActiveFilter    = ''
+        FilterHistory   = [System.Collections.Generic.List[object]]::new()
+        PageIndex       = 0
+        PinnedEvents    = [System.Collections.Generic.List[object]]::new()
+        Bookmarks       = [System.Collections.Generic.List[object]]::new()
+        Watchlist       = @{}
+        Variables       = @{}
+        Journal         = [System.Collections.Generic.List[object]]::new()
+        OutputFormat    = 'Grid'
+        DisplayColumns  = @()
+        FieldWidths     = @{}
+        Highlight       = ''
+        CommandHistory  = [System.Collections.Generic.List[string]]::new()
+        Aliases         = @{}
+        SourceFiles     = @($LoadedFiles)
+        StartTime       = [datetime]::Now
+        Config          = $config
+        _Exit           = $false
+        _Rerun          = $false
+        _RerunInput     = ''
+        _EvidenceCtx    = $null
+        FieldIndex      = @{}
+    }
+
+    # Apply config defaults
+    if ($config.defaultOutputFormat) { $session.OutputFormat = $config.defaultOutputFormat }
+    if ($config.defaultColumns -and @($config.defaultColumns).Count -gt 0) { $session.DisplayColumns = @($config.defaultColumns) }
+    if ($config.aliases) { foreach ($prop in $config.aliases.PSObject.Properties) { $session.Aliases[$prop.Name] = $prop.Value } }
+    if ($config.watchlist) { foreach ($prop in $config.watchlist.PSObject.Properties) { $session.Watchlist[$prop.Name] = @($prop.Value) } }
+
+    # --- A3: Build field index ---
+    $indexFields = if ($config.autoIndex) { @($config.autoIndex) } else { @('srcip','dstip','user','action','severity') }
+    if ($Events.Count -gt 0) { Update-FieldIndex $session $indexFields }
+
+    # --- Banner ---
     Write-ColorText "Invoke-LogParser v$($script:Version)" $c.BoldWhite
     Write-Host "Loaded $(Format-Number $Events.Count) events from $($LoadedFiles.Count) file(s)"
+    if ($session.Watchlist.Count -gt 0) { Write-Host "Watchlist active: $($session.Watchlist.Count) field(s)" }
     Write-Host "Type 'help' for commands."
     Write-Host ''
 
-    $currentEvents = $Events
-    $filteredEvents = $Events
-    $activeFilter = ''
-
+    # --- Main loop ---
+    $rerun = $false
     while ($true) {
-        Write-Host "$($c.BoldCyan)ILP> $($c.Reset)" -NoNewline
-        $input2 = Read-Host
-        if ([string]::IsNullOrWhiteSpace($input2)) { continue }
-        $input2 = $input2.Trim()
+        if (-not $rerun) {
+            # Build prompt
+            $pp = @('ILP')
+            if ($session.ActiveFilter) { $pp += "($($session.ActiveFilter))" }
+            $pp += "[$($session.FilteredEvents.Count)]"
+            if ($session.PinnedEvents.Count -gt 0) { $pp += "[pin:$($session.PinnedEvents.Count)]" }
+            if ($session.Watchlist.Count -gt 0) { $pp += '[W]' }
+            if ($session._EvidenceCtx) { $pp += "[E:$($session._EvidenceCtx.ControlId)]" }
+            $hlI = if ($session.Highlight) { ' H' } else { '' }
+            Write-Host "$($c.BoldCyan)$($pp -join ' ')$hlI> $($c.Reset)" -NoNewline
+            $input2 = Read-Host
+            if ([string]::IsNullOrWhiteSpace($input2)) { continue }
+            $input2 = $input2.Trim()
+            $session.CommandHistory.Add($input2)
 
-        switch -Regex ($input2) {
-            '^(exit|quit)$' { return }
-            '^help$' {
-                Write-Host @"
-
-  QUERY SYNTAX:
-    field:value         Exact match
-    field:val*          Wildcard
-    field:>N / field:<N Numeric comparison
-    NOT field:value     Negation
-    expr AND expr       Boolean AND
-    expr OR expr        Boolean OR
-    query | count       Count results
-    query | count by F  Group and count by field
-    query | top N       Top N results
-    query | sort F asc  Sort by field
-    query | head N      First N results
-    query | tail N      Last N results
-
-  COMMANDS:
-    load <file>         Load additional log file
-    unload <file>       Remove a source
-    sources             List loaded sources
-    stats               Show statistics
-    analyze <engine>    Run analysis (failed-logins, vpn-sessions, ipsec-tunnel)
-    report <type>       Generate report (summary, morning, audit, compliance, timeline)
-    report <type> --export <path>  Generate and export report
-    fields              List available fields
-    export <fmt> <path> Export (csv, json, html)
-    bookmark <N>        Bookmark event N
-    bookmarks           Show bookmarked events
-    copy                Copy filtered results to clipboard
-    highlight <pat>     Toggle highlight pattern
-    clear               Clear active filter
-    help                Show this help
-    exit                Exit
-"@
-            }
-            '^load\s+(.+)$' {
-                $loadPath = $Matches[1].Trim('"', "'")
-                if (-not (Test-Path $loadPath)) { Write-Host "File not found: $loadPath"; continue }
-                $fmt = Invoke-DetectLogFormat $loadPath
-                if (-not $fmt) { Write-Host "Unknown format: $loadPath"; continue }
-                $newEvents = Invoke-ParseLogFile -FilePath $loadPath -Format $fmt -SourceFile $loadPath
-                if ($null -ne $newEvents -and $newEvents.Count -gt 0) {
-                    $currentEvents.AddRange($newEvents)
-                    $currentEvents = [System.Collections.Generic.List[object]]($currentEvents | Sort-Object Timestamp)
-                    $filteredEvents = $currentEvents
-                    $activeFilter = ''
-                    Write-Host "Loaded $(Format-Number $newEvents.Count) events from $loadPath ($fmt)"
-                    Write-Host "Total: $(Format-Number $currentEvents.Count) events"
-                }
-            }
-            '^sources$' {
-                $groups = @{}
-                foreach ($e in $currentEvents) {
-                    $sf = if ($e.SourceFile) { $e.SourceFile } else { '(unknown)' }
-                    if (-not $groups.ContainsKey($sf)) { $groups[$sf] = @{ Format = $e.SourceFormat; Count = 0 } }
-                    $groups[$sf].Count++
-                }
-                $idx = 1
-                foreach ($sf in $groups.Keys) {
-                    Write-Host "  $idx. $($sf.PadRight(25)) $($groups[$sf].Format.PadRight(20)) $(Format-Number $groups[$sf].Count) events"
-                    $idx++
-                }
-            }
-            '^stats$' {
-                $stats = Get-LogStatistics $filteredEvents
-                Write-LogStats -Stats $stats -SourceFiles $LoadedFiles -Formats $LoadedFormats
-            }
-            '^fields$' {
-                $allFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-                @('Timestamp','Severity','Source','Message','SourceFile','SourceFormat') | ForEach-Object { $allFields.Add($_) | Out-Null }
-                foreach ($e in $currentEvents) { foreach ($k in $e.Extra.Keys) { $allFields.Add($k) | Out-Null } }
-                Write-Host "Available fields: $($allFields -join ', ')"
-            }
-            '^analyze\s+(.+)$' {
-                $engine = $Matches[1].Trim()
-                switch -Wildcard ($engine) {
-                    'failed*' {
-                        $results = Invoke-AnalyzeFailedLogins $filteredEvents
-                        if ($results.Count -eq 0) { Write-Host 'No failed login events found.'; continue }
-                        Write-ColorText "$([string][char]0x2500 * 3) Failed Login Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-                        Write-Host "  $($c.BoldWhite)$('User'.PadRight(30)) $('Count'.PadRight(8)) $('IPs'.PadRight(6)) $('First Seen'.PadRight(20)) $('Last Seen'.PadRight(20)) Sources$($c.Reset)"
-                        foreach ($r in $results) {
-                            $color = if ($r.Count -ge 10) { $c.Red } elseif ($r.Count -ge 5) { $c.Yellow } else { '' }
-                            $fs = if ($r.FirstSeen -ne [datetime]::MinValue) { $r.FirstSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
-                            $ls = if ($r.LastSeen -ne [datetime]::MinValue) { $r.LastSeen.ToString('yyyy-MM-dd HH:mm') } else { '' }
-                            Write-Host "  $color$($r.User.PadRight(30)) $($r.Count.ToString().PadRight(8)) $($r.SourceIPs.Count.ToString().PadRight(6)) $($fs.PadRight(20)) $($ls.PadRight(20)) $($r.Sources -join ', ')$($c.Reset)"
-                        }
-                    }
-                    'vpn*' {
-                        $results = Invoke-AnalyzeVpnSessions $filteredEvents
-                        Write-ColorText "$([string][char]0x2500 * 3) VPN Session Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-                        foreach ($uk in $results.Sessions.Keys) {
-                            foreach ($s in $results.Sessions[$uk]) {
-                                $st = if ($s.StartTime -ne [datetime]::MinValue) { $s.StartTime.ToString('yyyy-MM-dd HH:mm') } else { '' }
-                                $et = if ($s.EndTime) { $s.EndTime.ToString('yyyy-MM-dd HH:mm') } else { '(active)' }
-                                $dur = if ($s.Duration) { $s.Duration.ToString('d\.hh\:mm\:ss') } else { '' }
-                                Write-Host "  $($s.User.PadRight(25)) $($st.PadRight(18)) $($et.PadRight(18)) $($dur.PadRight(14)) $($s.RemoteIP)"
-                            }
-                        }
-                        if ($results.ImpossibleTravel.Count -gt 0) {
-                            Write-Host ''
-                            Write-ColorText "  IMPOSSIBLE TRAVEL FLAGS ($($results.ImpossibleTravel.Count)):" $c.Red
-                            foreach ($tf in $results.ImpossibleTravel) {
-                                Write-ColorText "    $($tf.User): $($tf.IP1) @ $($tf.Time1.ToString('HH:mm')) -> $($tf.IP2) @ $($tf.Time2.ToString('HH:mm')) ($($tf.MinutesBetween) min)" $c.Yellow
-                            }
-                        }
-                    }
-                    'ipsec*' {
-                        $results = Invoke-AnalyzeIpsecTunnel $filteredEvents
-                        Write-ColorText "$([string][char]0x2500 * 3) IPsec Tunnel Analysis $([string][char]0x2500 * 35)" $c.BoldWhite
-                        Write-Host "  Total: $($results.Summary.TotalTunnels) | Up: $($results.Summary.UpCount) | Down: $($results.Summary.DownCount) | Flaps: $($results.Summary.FlapCount)"
-                        foreach ($tn in $results.Tunnels.Keys) {
-                            $t = $results.Tunnels[$tn]
-                            $color = if ($t.Status -eq 'Down') { $c.Red } elseif ($t.FlapCount -gt 0) { $c.Yellow } else { $c.Green }
-                            Write-Host "  $color$($t.TunnelName.PadRight(25)) $($t.Status.PadRight(8)) Flaps:$($t.FlapCount.ToString().PadRight(5)) $(if ($t.LastFailureReason) { $t.LastFailureReason } else { '-' })$($c.Reset)"
-                        }
-                    }
-                    default { Write-Host "Unknown analysis: $engine. Use: failed-logins, vpn-sessions, ipsec-tunnel" }
-                }
-            }
-            '^report\s+(.+)$' {
-                $reportArgs = $Matches[1].Trim()
-                $exportPath = $null
-                if ($reportArgs -match '--export\s+(\S+)') { $exportPath = $Matches[1]; $reportArgs = ($reportArgs -replace '--export\s+\S+', '').Trim() }
-                $reportData = switch -Wildcard ($reportArgs) {
-                    'summary*'    { New-SummaryReport $filteredEvents }
-                    'morning*'    { New-MorningBriefing $filteredEvents }
-                    'audit*'      { New-AuditReport $filteredEvents }
-                    'compliance*' { New-ComplianceReport $filteredEvents }
-                    'timeline*'   { New-TimelineReport $filteredEvents }
-                    default       { Write-Host "Unknown report: $reportArgs"; $null }
-                }
-                if ($reportData) {
-                    Render-ReportToConsole $reportData
-                    if ($exportPath) {
-                        $fmt = if ($exportPath -match '\.csv$') { 'Csv' } elseif ($exportPath -match '\.json$') { 'Json' } else { 'Html' }
-                        Export-Report -Path $exportPath -Format $fmt -ReportData $reportData -Events $filteredEvents
-                    }
-                }
-            }
-            '^export\s+(\w+)\s+(.+)$' {
-                $fmt = $Matches[1]; $path2 = $Matches[2].Trim('"', "'")
-                $eFmt = switch ($fmt.ToLower()) { 'csv' { 'Csv' } 'json' { 'Json' } 'html' { 'Html' } default { 'Csv' } }
-                $reportData = New-SummaryReport $filteredEvents
-                Export-Report -Path $path2 -Format $eFmt -ReportData $reportData -Events $filteredEvents
-            }
-            '^bookmark\s+(\d+)$' {
-                $bIdx = [int]$Matches[1] - 1
-                if ($bIdx -ge 0 -and $bIdx -lt $filteredEvents.Count) {
-                    $script:Bookmarks.Add($filteredEvents[$bIdx])
-                    Write-Host "Bookmarked event #$($Matches[1])"
-                } else { Write-Host "Invalid event number." }
-            }
-            '^bookmarks(\s+--(.+))?$' {
-                if ($Matches[2] -eq 'clear') { $script:Bookmarks.Clear(); Write-Host 'Cleared all bookmarks.'; continue }
-                if ($Matches[2] -match 'export\s+(.+)') {
-                    $bp = $Matches[1].Trim()
-                    $csv = Format-LogCsv -Events $script:Bookmarks
-                    [System.IO.File]::WriteAllLines($bp, @($csv))
-                    Write-Host "Exported $($script:Bookmarks.Count) bookmarks to $bp"
-                    continue
-                }
-                if ($Matches[2] -eq 'copy') {
-                    try {
-                        $text = ($script:Bookmarks | ForEach-Object { "$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))  $($_.Severity)  $($_.Source)  $($_.Message)" }) -join "`n"
-                        Set-Clipboard $text
-                        Write-Host "Copied $($script:Bookmarks.Count) bookmarks to clipboard."
-                    } catch { Write-Host "Clipboard not available." }
-                    continue
-                }
-                if ($script:Bookmarks.Count -eq 0) { Write-Host 'No bookmarks.'; continue }
-                Write-ColorText "$([string][char]0x2500 * 3) $($script:Bookmarks.Count) Bookmarked Events $([string][char]0x2500 * 30)" $c.BoldWhite
-                $bi = 0
-                foreach ($b in $script:Bookmarks) {
-                    $bi++
-                    $ts = if ($b.Timestamp -ne [datetime]::MinValue) { $b.Timestamp.ToString('yyyy-MM-dd HH:mm:ss') } else { '' }
-                    Write-Host "  [$bi] $ts  $(Get-SeverityAbbrev $b.Severity)  $($b.Source)  $($b.Message.Substring(0, [Math]::Min(60, $b.Message.Length)))"
-                }
-            }
-            '^copy(\s+(\d+))?$' {
-                try {
-                    if ($Matches[2]) {
-                        $ci = [int]$Matches[2] - 1
-                        if ($ci -ge 0 -and $ci -lt $filteredEvents.Count) {
-                            $e = $filteredEvents[$ci]
-                            Set-Clipboard "$($e.Timestamp) | $($e.Severity) | $($e.Source) | $($e.Message)`n$($e.RawLine)"
-                            Write-Host "Copied event #$($Matches[2]) to clipboard."
-                        }
-                    } else {
-                        $text = ($filteredEvents | ForEach-Object { "$($_.Timestamp.ToString('yyyy-MM-dd HH:mm:ss'))  $($_.Severity)  $($_.Source)  $($_.Message)" }) -join "`n"
-                        Set-Clipboard $text
-                        Write-Host "Copied $(Format-Number $filteredEvents.Count) events to clipboard."
-                    }
-                } catch { Write-Host 'Clipboard not available.' }
-            }
-            '^clear$' { $filteredEvents = $currentEvents; $activeFilter = ''; Write-Host 'Filter cleared.' }
-            default {
-                # Treat as query
-                try {
-                    $filteredEvents = Invoke-FilterEvents -Events $currentEvents -Query $input2
-                    $activeFilter = $input2
-                    # Check if aggregation result
-                    if ($filteredEvents.Count -gt 0 -and $filteredEvents[0].PSObject.Properties['_AggCount']) {
-                        Format-LogTable -Events $filteredEvents -Max 50
-                    } else {
-                        Write-Host "$(Format-Number $filteredEvents.Count) events"
-                        if ($filteredEvents.Count -gt 0 -and $filteredEvents.Count -le 50) {
-                            Format-LogGrid -Events $filteredEvents -Max 50
-                        }
-                    }
-                } catch { Write-Host "Query error: $_" }
+            # Alias expansion
+            $fw = ($input2 -split '\s+', 2)[0]
+            if ($session.Aliases.ContainsKey($fw)) {
+                $rest = if ($input2.Length -gt $fw.Length) { $input2.Substring($fw.Length) } else { '' }
+                $input2 = $session.Aliases[$fw] + $rest
             }
         }
-        Write-Host ''
+        $rerun = $false
+
+        # Variable expansion in queries: $varname -> OR expansion
+        if ($input2 -match '\$(\w+)' -and $session.Variables.ContainsKey($Matches[1])) {
+            $vn = $Matches[1]; $vv = $session.Variables[$vn]
+            if ($vv -is [array] -or $vv -is [System.Collections.IEnumerable]) {
+                $before = $input2 -replace "\`$$vn", ''
+                if ($before -match '([\w-]+):\$') { $fld = $Matches[1]
+                    $expanded = ($vv | ForEach-Object { "$fld`:$_" }) -join ' OR '
+                    $input2 = $input2 -replace "[^\s]+:\`$$vn", "($expanded)"
+                }
+            }
+        }
+
+        # --- !N / !! history re-execution ---
+        if ($input2 -match '^!(\d+)$') {
+            $hi = [int]$Matches[1] - 1
+            if ($hi -lt 0 -or $hi -ge $session.CommandHistory.Count) { Write-Host "History index out of range (1-$($session.CommandHistory.Count))"; Write-Host ''; continue }
+            $input2 = $session.CommandHistory[$hi]; Write-Host "$($c.Dim)>> $input2$($c.Reset)"; $session.CommandHistory.Add($input2); $rerun = $true; continue
+        }
+        if ($input2 -eq '!!') {
+            if ($session.CommandHistory.Count -lt 2) { Write-Host 'No previous command.'; Write-Host ''; continue }
+            $input2 = $session.CommandHistory[$session.CommandHistory.Count - 2]; Write-Host "$($c.Dim)>> $input2$($c.Reset)"; $session.CommandHistory.Add($input2); $rerun = $true; continue
+        }
+
+        # --- Command chaining (;) ---
+        $segments = @($input2)
+        if ($input2.Contains(' ; ')) { $segments = $input2 -split ' ; ' }
+
+        foreach ($seg in $segments) {
+            $seg = $seg.Trim(); if (-not $seg) { continue }
+
+            # --- Help handler (auto-generated from registry) ---
+            if ($seg -eq 'help') {
+                $cats = [ordered]@{}
+                foreach ($cmd in $script:ILPCommands.Values) { if (-not $cats.ContainsKey($cmd.Category)) { $cats[$cmd.Category] = @() }; $cats[$cmd.Category] += $cmd }
+                Write-Host ''
+                Write-Host "  $($c.BoldWhite)QUERY SYNTAX$($c.Reset)"
+                Write-Host "    field:value  Exact    field:val*  Wildcard    field:>N/<N  Numeric"
+                Write-Host "    NOT / AND / OR        | count [by F]  | top N  | sort F  | head/tail N"
+                Write-Host ''
+                foreach ($cat in $cats.Keys) {
+                    Write-Host "  $($c.BoldWhite)$($cat.ToUpper())$($c.Reset)"
+                    foreach ($cmd in $cats[$cat]) { Write-Host "    $($cmd.Usage.PadRight(32)) $($cmd.Help.Split("`n")[0])" }
+                    Write-Host '' }
+                Write-Host "  $($c.BoldWhite)OTHER$($c.Reset)"
+                Write-Host "    !N / !!                          Re-run command from history"
+                Write-Host "    cmd1 ; cmd2                      Command chaining"
+                Write-Host "    `$name = select <field>           Capture values to variable"
+                Write-Host "    exit / quit                      Exit interactive mode"
+                continue
+            }
+            if ($seg -match '^help\s+(\S+)$') {
+                $hc = $Matches[1]; $found = $false
+                foreach ($cmd in $script:ILPCommands.Values) { if ($cmd.Name -eq $hc -or $cmd.Usage -like "$hc*") { Write-Host "`nUsage: $($cmd.Usage)`n$($cmd.Help)"; $found = $true; break } }
+                if (-not $found) { Write-Host "No help for '$hc'." }
+                continue
+            }
+
+            # --- Dispatcher: match against registered commands ---
+            $matched = $false
+            foreach ($cmd in $script:ILPCommands.Values) {
+                if ($seg -match $cmd.Pattern) {
+                    try { & $cmd.Handler $session $Matches } catch { Write-Host "Error: $_" }
+                    $matched = $true
+
+                    # Auto-journal
+                    if ($session.Config.journalAutoLog -and $cmd.Category -notin @('Session','Core')) {
+                        $summary = switch -Wildcard ($cmd.Name) {
+                            'show' { "Inspected event #$($Matches[1])" }
+                            'search' { "$($session.FilteredEvents.Count) events matching '$($Matches[1])'" }
+                            'correlate' { "Correlated on $($Matches[1]): $($session.FilteredEvents.Count) events" }
+                            default { "$($session.FilteredEvents.Count) events" }
+                        }
+                        $session.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command=$seg; Summary=$summary; Type='command' })
+                    }
+
+                    if ($session._Exit) { return }
+                    if ($session._Rerun) { $input2 = $session._RerunInput; $session._Rerun = $false; $rerun = $true }
+                    break
+                }
+            }
+
+            if ($rerun) { break }
+
+            # --- Default: treat as query ---
+            if (-not $matched) {
+                try {
+                    $session.FilterHistory.Add(@{ Filter = $session.ActiveFilter; Events = $session.FilteredEvents })
+                    $session.FilteredEvents = Invoke-FilterEvents -Events $session.AllEvents -Query $seg
+                    $session.ActiveFilter = $seg; $session.PageIndex = 0
+                    if ($session.FilteredEvents.Count -gt 0 -and $session.FilteredEvents[0].PSObject.Properties['_AggCount']) {
+                        Format-LogTable -Events $session.FilteredEvents -HighlightPattern $session.Highlight -Max 50
+                    } else {
+                        Write-Host "$(Format-Number $session.FilteredEvents.Count) events"
+                        if ($session.FilteredEvents.Count -gt 0 -and $session.FilteredEvents.Count -le 50) {
+                            switch ($session.OutputFormat) {
+                                'Table' { Format-LogTable -Events $session.FilteredEvents -HighlightPattern $session.Highlight -FieldList $session.DisplayColumns -Max 50 }
+                                'List'  { Format-LogList -Events $session.FilteredEvents -HighlightPattern $session.Highlight -Max 50 }
+                                default { Format-LogGrid -Events $session.FilteredEvents -HighlightPattern $session.Highlight -FieldList $session.DisplayColumns -Max 50 }
+                            }
+                        }
+                    }
+                    if ($session.Config.journalAutoLog) { $session.Journal.Add([PSCustomObject]@{ Timestamp=[datetime]::Now; Command=$seg; Summary="$($session.FilteredEvents.Count) events"; Type='command' }) }
+                } catch {
+                    # Fuzzy match suggestion
+                    $errMsg = "$_"
+                    $cmdNames = @($script:ILPCommands.Keys)
+                    $firstWord = ($seg -split '\s+', 2)[0]
+                    $suggestion = ''
+                    foreach ($cn in $cmdNames) { if ((Get-LevenshteinDistance $firstWord $cn) -le 2) { $suggestion = $cn; break } }
+                    Write-Host "Query error: $errMsg"
+                    if ($suggestion) { Write-Host "$($c.Dim)Did you mean: $suggestion?$($c.Reset)" }
+                }
+            }
+        }
+
+        if (-not $rerun) { Write-Host '' }
     }
 }
 
