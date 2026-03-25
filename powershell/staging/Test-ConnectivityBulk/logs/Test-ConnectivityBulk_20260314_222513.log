@@ -1,0 +1,40 @@
+[2026-03-14 22:25:13] [INFO] Starting Test-ConnectivityBulk
+[2026-03-14 22:25:13] [INFO] Received 1 target(s) from parameters/pipeline
+[2026-03-14 22:25:13] [INFO] Expanded CIDR 192.168.4.0/28 -> 14 host(s)
+[2026-03-14 22:25:13] [INFO] Workers: 10  |  Targets: 14
+[2026-03-14 22:25:13] [INFO] Dispatched 14 test(s)
+[2026-03-14 22:25:23] [INFO] Progress: 14/14
+[2026-03-14 22:25:23] [INFO] Done — Reachable: 1  Unreachable: 13  Skipped: 0
+[2026-03-14 22:25:23] [INFO] CSV: /home/michael/work/repos/Scripts/powershell/staging/Test-ConnectivityBulk/output/ConnectivityReport_20260314_222523.csv
+
+════════════════════════════════════════════════════════════════════════════
+  Connectivity Test  —  2026-03-14 22:25:23
+  Targets: 14  |  no port check  |  Workers: 10
+════════════════════════════════════════════════════════════════════════════
+
+  REACHABLE HOSTS (1 of 14)
+────────────────────────────────────────────────────────────────────────────
+  192.168.4.1                                192.168.4.1  avg: 2.8ms
+
+  UNREACHABLE HOSTS (13)
+────────────────────────────────────────────────────────────────────────────
+  192.168.4.2                                resolved: N/A
+  192.168.4.3                                resolved: N/A
+  192.168.4.4                                resolved: N/A
+  192.168.4.5                                resolved: N/A
+  192.168.4.6                                resolved: N/A
+  192.168.4.7                                resolved: N/A
+  192.168.4.8                                resolved: N/A
+  192.168.4.9                                resolved: N/A
+  192.168.4.10                               resolved: N/A
+  192.168.4.11                               resolved: N/A
+  192.168.4.12                               resolved: N/A
+  192.168.4.13                               resolved: N/A
+  192.168.4.14                               resolved: N/A
+
+════════════════════════════════════════════════════════════════════════════
+  TOTAL: 14 hosts  |  1 reachable  |  13 unreachable
+  CSV: /home/michael/work/repos/Scripts/powershell/staging/Test-ConnectivityBulk/output/ConnectivityReport_20260314_222523.csv
+════════════════════════════════════════════════════════════════════════════
+
+[2026-03-14 22:25:23] [INFO] Completed Test-ConnectivityBulk successfully

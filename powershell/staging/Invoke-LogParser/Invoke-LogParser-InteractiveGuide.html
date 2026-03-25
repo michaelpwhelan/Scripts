@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoke-LogParser &mdash; Interactive Mode Guide</title>
+<style>
+  @page {
+    size: letter;
+    margin: 0.75in 0.8in;
+    @bottom-center { content: counter(page); font-size: 9pt; color: #666; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", -apple-system, Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+    max-width: 7in;
+    margin: 0 auto;
+  }
+
+  .cover {
+    text-align: center;
+    padding: 1.2in 0 0.6in;
+    border-bottom: 3px solid #0078d4;
+    margin-bottom: 0.4in;
+    page-break-after: always;
+  }
+  .cover h1 { font-size: 28pt; margin: 0 0 0.08in; color: #0078d4; }
+  .cover .subtitle { font-size: 13pt; color: #444; margin: 0 0 0.35in; }
+  .cover .meta { font-size: 10pt; color: #666; }
+
+  h2 {
+    font-size: 16pt;
+    color: #0078d4;
+    border-bottom: 2px solid #0078d4;
+    padding-bottom: 3pt;
+    margin-top: 0.35in;
+    margin-bottom: 0.12in;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt;
+    color: #333;
+    margin-top: 0.2in;
+    margin-bottom: 0.06in;
+    page-break-after: avoid;
+  }
+  h4 {
+    font-size: 10.5pt;
+    color: #444;
+    margin-top: 0.14in;
+    margin-bottom: 0.04in;
+  }
+  p, li { margin: 0.04in 0; }
+  ul, ol { padding-left: 0.25in; margin: 0.06in 0; }
+  li { margin-bottom: 0.03in; }
+
+  code {
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f0f4f8;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color: #1a1a1a;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    border-left: 3px solid #0078d4;
+    border-radius: 4px;
+    padding: 8pt 10pt;
+    font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    margin: 0.06in 0 0.12in;
+    page-break-inside: avoid;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .comment { color: #6a737d; }
+  .prompt { color: #0078d4; font-weight: 600; }
+  .output { color: #555; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.08in 0 0.12in;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #d0d7de;
+    padding: 5pt 8pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f0f4f8; font-weight: 600; color: #1a1a1a; }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  .toc { margin: 0.2in 0 0.3in; }
+  .toc a { color: #0078d4; text-decoration: none; }
+  .toc li { margin-bottom: 0.03in; }
+
+  .note {
+    background: #fff8e1;
+    border-left: 3px solid #f9a825;
+    padding: 6pt 10pt;
+    margin: 0.08in 0;
+    font-size: 9.5pt;
+    border-radius: 0 4px 4px 0;
+  }
+  .tip {
+    background: #e8f5e9;
+    border-left: 3px solid #4caf50;
+    padding: 6pt 10pt;
+    margin: 0.08in 0;
+    font-size: 9.5pt;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .page-break { page-break-before: always; }
+
+  .ref-card {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.08in;
+    margin: 0.1in 0;
+  }
+  .ref-card div {
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    border-radius: 4px;
+    padding: 6pt 8pt;
+    font-size: 9pt;
+  }
+  .ref-card div strong { display: block; color: #0078d4; margin-bottom: 2pt; }
+
+  strong { color: #1a1a1a; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <h1>Invoke-LogParser</h1>
+  <div class="subtitle">Interactive Mode Guide</div>
+  <p class="meta">
+    A comprehensive reference for the interactive REPL &mdash; event inspection,<br>
+    investigation pivots, session management, and visualization commands.<br><br>
+    PowerShell 5.1+ &bull; Zero dependencies &bull; Cross-platform
+  </p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<h2>Contents</h2>
+<ol class="toc">
+  <li><a href="#getting-started">Getting Started</a></li>
+  <li><a href="#prompt">Prompt Anatomy</a></li>
+  <li><a href="#query-syntax">Query Syntax Reference</a></li>
+  <li><a href="#inspection">Inspection Commands</a></li>
+  <li><a href="#investigation">Investigation Commands</a></li>
+  <li><a href="#time">Time-Based Investigation</a></li>
+  <li><a href="#analysis">Analysis &amp; Display Commands</a></li>
+  <li><a href="#enrichment">Enrichment &amp; Intelligence</a></li>
+  <li><a href="#data-management">Data Management Commands</a></li>
+  <li><a href="#session">Session &amp; Workflow Commands</a></li>
+  <li><a href="#journal">Investigation Journal &amp; Bookmarks</a></li>
+  <li><a href="#watchlist">Watchlist</a></li>
+  <li><a href="#variables">Variables</a></li>
+  <li><a href="#compliance">Compliance &amp; Evidence Collection</a></li>
+  <li><a href="#playbooks">Playbooks</a></li>
+  <li><a href="#persistence">Session Persistence</a></li>
+  <li><a href="#workflows">Investigation Workflows</a></li>
+  <li><a href="#quick-ref">Quick Reference Card</a></li>
+</ol>
+
+<!-- 1. GETTING STARTED -->
+<h2 id="getting-started">1. Getting Started</h2>
+
+<h3>Launching Interactive Mode</h3>
+<p>Pass the <code>-Interactive</code> switch when invoking the script:</p>
+<pre><code><span class="comment"># Parse a log file and enter interactive mode</span>
+.\Invoke-LogParser.ps1 -Path .\firewall.log -Interactive
+
+<span class="comment"># Parse multiple files</span>
+.\Invoke-LogParser.ps1 -Path .\fw1.log, .\fw2.log -Interactive
+
+<span class="comment"># Parse all logs in a directory</span>
+.\Invoke-LogParser.ps1 -Path .\logs\ -Interactive</code></pre>
+
+<p>On launch you'll see a summary followed by the interactive prompt:</p>
+<pre><code><span class="output">Invoke-LogParser v7.0
+Loaded 4,312 events from 2 file(s)
+Type 'help' for commands.</span>
+
+<span class="prompt">ILP [4312]></span></code></pre>
+
+<h3>Getting Help</h3>
+<p>Type <code>help</code> for a categorized command overview, or <code>help &lt;command&gt;</code> for
+detailed usage and examples for any specific command.</p>
+<pre><code><span class="prompt">ILP [4312]></span> help correlate
+<span class="output">Usage: correlate &lt;field&gt;
+Pivot: find ALL events in the full dataset sharing field values with current results.
+Example: Filter to action:deny, then correlate srcip to see everything those IPs did.</span></code></pre>
+
+<div class="page-break"></div>
+
+<!-- 2. PROMPT ANATOMY -->
+<h2 id="prompt">2. Prompt Anatomy</h2>
+
+<p>The interactive prompt dynamically reflects session state:</p>
+<pre><code><span class="prompt">ILP (action:deny) [234] [pin:12] [W] [E:AC-2] H></span>
+ |        |         |       |      |      |     |
+ |        |         |       |      |      |     +-- Highlight active
+ |        |         |       |      |      +-------- Evidence collection for AC-2
+ |        |         |       |      +--------------- Watchlist active
+ |        |         |       +---------------------- 12 events pinned
+ |        |         +------------------------------ 234 events in current result set
+ |        +---------------------------------------- Active filter query
+ +------------------------------------------------- Tool name</code></pre>
+
+<table>
+  <tr><th>Component</th><th>Meaning</th><th>When Shown</th></tr>
+  <tr><td><code>ILP</code></td><td>Invoke-LogParser identifier</td><td>Always</td></tr>
+  <tr><td><code>(query)</code></td><td>Active filter expression</td><td>When a filter is active</td></tr>
+  <tr><td><code>[N]</code></td><td>Number of events in current result set</td><td>Always</td></tr>
+  <tr><td><code>[pin:N]</code></td><td>Number of pinned events</td><td>When events are pinned</td></tr>
+  <tr><td><code>[W]</code></td><td>Watchlist is active</td><td>When watch values are defined</td></tr>
+  <tr><td><code>[E:id]</code></td><td>Evidence collection in progress</td><td>During evidence collection</td></tr>
+  <tr><td><code>H</code></td><td>Highlight pattern is active</td><td>When highlighting is on</td></tr>
+</table>
+
+<!-- 3. QUERY SYNTAX -->
+<h2 id="query-syntax">3. Query Syntax Reference</h2>
+
+<p>Type a query expression directly at the prompt to filter events. The result set
+replaces the current view, and you can <code>undo</code> to go back.</p>
+
+<table>
+  <tr><th>Syntax</th><th>Description</th><th>Example</th></tr>
+  <tr><td><code>field:value</code></td><td>Exact match</td><td><code>action:deny</code></td></tr>
+  <tr><td><code>field:val*</code></td><td>Wildcard match</td><td><code>srcip:10.0.*</code></td></tr>
+  <tr><td><code>field:&gt;N</code> / <code>field:&lt;N</code></td><td>Numeric comparison</td><td><code>sentbyte:&gt;1000000</code></td></tr>
+  <tr><td><code>NOT field:value</code></td><td>Negation</td><td><code>NOT severity:Info</code></td></tr>
+  <tr><td><code>expr AND expr</code></td><td>Boolean AND</td><td><code>action:deny AND srcip:10.0.1.5</code></td></tr>
+  <tr><td><code>expr OR expr</code></td><td>Boolean OR</td><td><code>severity:Critical OR severity:High</code></td></tr>
+</table>
+
+<h3>Pipe Operators</h3>
+<p>Append a pipe operator to any query to aggregate or limit results:</p>
+<table>
+  <tr><th>Operator</th><th>Description</th><th>Example</th></tr>
+  <tr><td><code>| count</code></td><td>Count matching events</td><td><code>action:deny | count</code></td></tr>
+  <tr><td><code>| count by F</code></td><td>Group and count by field</td><td><code>action:deny | count by srcip</code></td></tr>
+  <tr><td><code>| top N</code></td><td>Top N results</td><td><code>severity:High | top 10</code></td></tr>
+  <tr><td><code>| sort F asc</code></td><td>Sort by field</td><td><code>severity:High | sort Timestamp asc</code></td></tr>
+  <tr><td><code>| head N</code></td><td>First N results</td><td><code>action:deny | head 5</code></td></tr>
+  <tr><td><code>| tail N</code></td><td>Last N results</td><td><code>action:deny | tail 5</code></td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 4. INSPECTION COMMANDS -->
+<h2 id="inspection">4. Inspection Commands</h2>
+
+<p>These commands let you examine individual events and navigate through result sets.</p>
+
+<h3><code>show &lt;N&gt;</code> &mdash; Full Event Detail</h3>
+<p>Displays every field (sorted), metadata (SourceFile, LineNumber, SourceFormat),
+and the raw log line for event #N in the current result set.</p>
+<pre><code><span class="prompt">ILP (action:deny) [234]></span> show 1
+<span class="output">--- Event #1 ----------------------------------------
+Timestamp     2025-03-18 14:22:31.000
+Severity      High
+Source         FortiGate-200F
+Message       Deny UDP 10.0.1.5->8.8.8.8:53
+action        deny
+dstip         8.8.8.8
+srcip         10.0.1.5
+SourceFile    firewall.log
+SourceFormat  FortiGateKV
+---------------------------------------------------</span></code></pre>
+
+<h3><code>raw &lt;N&gt;</code> &mdash; Raw Log Line</h3>
+<p>Print the original, unparsed log line for event #N. Useful for copying to
+other tools or verifying field extraction.</p>
+<pre><code><span class="prompt">ILP [4312]></span> raw 1
+<span class="output">date=2025-03-18 time=14:22:31 devname="FortiGate-200F" ...</span></code></pre>
+
+<h3><code>context &lt;N&gt; [lines]</code> &mdash; Surrounding Lines</h3>
+<p>Show raw lines before and after event #N from the original file. Default
+context is 3 lines. Requires that the source file is accessible.</p>
+<pre><code><span class="prompt">ILP [4312]></span> context 5 2
+<span class="output">--- Context: 2 lines before/after ----------
+  [raw] date=2025-03-18 time=14:22:29 ...
+  [raw] date=2025-03-18 time=14:22:30 ...
+  >>> 2025-03-18 14:22:31  HIGH  Deny UDP ... <<<
+  [raw] date=2025-03-18 time=14:22:32 ...
+  [raw] date=2025-03-18 time=14:22:33 ...
+--------------------------------------------</span></code></pre>
+
+<h3><code>next</code> / <code>prev</code> &mdash; Paginated Browsing</h3>
+<p>Page through large result sets. Page size auto-detects from terminal height.
+Shows an "Events X-Y of Z" header on each page.</p>
+<pre><code><span class="prompt">ILP (action:deny) [234]></span> next
+<span class="output">Events 21-40 of 234
+TIMESTAMP             SEV     SOURCE           MESSAGE
+2025-03-18 14:23:01   High    FortiGate-200F   Deny TCP ...</span></code></pre>
+
+<h3><code>goto &lt;N&gt;</code> &mdash; Jump to Page</h3>
+<p>Jump directly to the page containing event #N.</p>
+<pre><code><span class="prompt">ILP (action:deny) [234]></span> goto 100
+<span class="output">Events 91-110 of 234
+...</span></code></pre>
+
+<h3><code>diff &lt;N&gt; &lt;M&gt;</code> &mdash; Compare Two Events</h3>
+<p>Side-by-side comparison of two events, showing only fields that differ.
+Useful for spotting what changed between similar events.</p>
+<pre><code><span class="prompt">ILP [4312]></span> diff 1 2
+<span class="output">--- Diff: #1 vs #2 ----------------------------
+FIELD               #1 VALUE                       #2 VALUE
+Timestamp           2025-03-18 14:22:31            2025-03-18 14:22:45
+srcip               10.0.1.5                       10.0.1.8
+dstport             53                             443</span></code></pre>
+
+<div class="page-break"></div>
+
+<!-- 5. INVESTIGATION COMMANDS -->
+<h2 id="investigation">5. Investigation Commands</h2>
+
+<p>These commands help you explore patterns, pivot across data, and
+build an investigative narrative.</p>
+
+<h3><code>whois &lt;field&gt;</code> / <code>inspect &lt;field&gt;</code> &mdash; Field Value Summary</h3>
+<p>Collect unique values for a field with counts, displayed as a bar chart (top 20).
+Both command names are equivalent.</p>
+<pre><code><span class="prompt">ILP (action:deny) [234]></span> whois srcip
+<span class="output">--- srcip (18 unique) ----------------------------
+10.0.1.5              ████████████████████  87
+10.0.2.12             ███████████           42
+192.168.1.100         ██████                28
+...</span></code></pre>
+
+<h3><code>timeline</code> &mdash; ASCII Histogram</h3>
+<p>Shows event distribution over time. Automatically picks bucket intervals
+based on the time span: &lt;2 hours = 5-minute buckets, &lt;48 hours = 1-hour buckets,
+otherwise daily buckets.</p>
+<pre><code><span class="prompt">ILP [4312]></span> timeline
+<span class="output">--- Timeline ----------------------------------------
+03-18 08:00   ████████                      24
+03-18 09:00   ██████████████████████████     78
+03-18 10:00   ████████████████               48
+03-18 11:00   ████████████████████           61
+...</span></code></pre>
+
+<h3><code>correlate &lt;field&gt;</code> &mdash; Pivot on Field Values</h3>
+<p>The key investigative command. Collects all unique values of <code>&lt;field&gt;</code>
+from the current result set, then finds <strong>all events in the full dataset</strong>
+that share those values. Saves previous state for <code>undo</code>.</p>
+
+<div class="tip">
+  <strong>Investigation pattern:</strong> Filter to suspicious events (e.g., <code>action:deny</code>),
+  then <code>correlate srcip</code> to see <em>everything</em> those source IPs did &mdash; including
+  allowed connections, login attempts, and other activity.
+</div>
+
+<pre><code><span class="prompt">ILP [4312]></span> action:deny AND severity:High
+<span class="output">87 events</span>
+
+<span class="prompt">ILP (action:deny AND severity:High) [87]></span> correlate srcip
+<span class="output">Correlated on 12 unique srcip values: 1,247 events</span>
+
+<span class="prompt">ILP (correlate:srcip) [1247]></span> whois action
+<span class="output">--- action (4 unique) ----------------------------
+allow                 ████████████████████  892
+deny                  ████████              312
+dns                   ████                  38
+ipsec                 █                     5</span></code></pre>
+
+<h3><code>search &lt;text&gt;</code> &mdash; Free-Text Search</h3>
+<p>Case-insensitive substring search across Severity, Source, Message, RawLine,
+and all Extra field values. Narrows the current result set.</p>
+<pre><code><span class="prompt">ILP [4312]></span> search admin
+<span class="output">156 events matching 'admin'</span></code></pre>
+
+<h3><code>exclude &lt;field&gt;:&lt;value&gt;</code> &mdash; Exclude Matching Events</h3>
+<p>Remove events matching a field:value pattern from the current result set.
+Supports wildcards. Saves previous state for <code>undo</code>.</p>
+<pre><code><span class="prompt">ILP (correlate:srcip) [1247]></span> exclude severity:Info
+<span class="output">892 events (excluded severity=Info)</span>
+
+<span class="prompt">ILP (exclude severity:Info) [892]></span> exclude srcip:10.0.1.*
+<span class="output">605 events (excluded srcip=10.0.1.*)</span></code></pre>
+
+<h3><code>unique &lt;field&gt;</code> &mdash; Deduplicate by Field</h3>
+<p>Keep only the first event per unique field value. Essential for
+&ldquo;which distinct IPs/users did X&rdquo; investigations.</p>
+<pre><code><span class="prompt">ILP (correlate:srcip) [1247]></span> unique srcip
+<span class="output">12 unique srcip values (from 1,247 events)</span></code></pre>
+
+<h3><code>highlight &lt;pattern&gt;</code> / <code>unhighlight</code></h3>
+<p>Set a text pattern to highlight in yellow in all subsequent output
+(<code>show</code>, <code>raw</code>, grid, table, and list views). Running <code>highlight</code> with the same pattern again
+toggles it off. Use <code>unhighlight</code> to clear explicitly.</p>
+<pre><code><span class="prompt">ILP [4312]></span> highlight deny
+<span class="output">Highlighting: deny</span>
+
+<span class="prompt">ILP [4312] H></span> unhighlight
+<span class="output">Highlight cleared.</span></code></pre>
+
+<!-- TIME-BASED -->
+<h2 id="time">Time-Based Investigation</h2>
+
+<h3><code>anchor &lt;N&gt; &lt;duration&gt; [before|after]</code></h3>
+<p>Find all events within a time window around event #N. Durations use suffixes:
+<code>s</code>=seconds, <code>m</code>=minutes, <code>h</code>=hours, <code>d</code>=days.</p>
+<pre><code><span class="prompt">ILP [4312]></span> anchor 42 5m
+<span class="output">187 events within 5m of event #42</span>
+
+<span class="prompt">ILP [4312]></span> anchor 42 30s after
+<span class="output">12 events within 30s after event #42</span></code></pre>
+
+<h3><code>between &lt;start&gt; to &lt;end&gt;</code></h3>
+<p>Filter to an explicit time window. Supports flexible timestamp formats:
+<code>HH:mm</code>, <code>MM-dd HH:mm</code>, <code>yyyy-MM-dd HH:mm:ss</code>.</p>
+<pre><code><span class="prompt">ILP [4312]></span> between 14:00 to 15:00
+<span class="output">342 events between 2026-03-18 14:00:00 and 2026-03-18 15:00:00</span></code></pre>
+
+<h3><code>window &lt;duration&gt;</code> / <code>since &lt;duration&gt;</code></h3>
+<p>Show events from the last N seconds/minutes/hours/days of the dataset.</p>
+<pre><code><span class="prompt">ILP [4312]></span> window 1h
+<span class="output">891 events in last 1h</span></code></pre>
+
+<div class="page-break"></div>
+
+<!-- 6. ANALYSIS & DISPLAY -->
+<h2 id="analysis">6. Analysis &amp; Display Commands</h2>
+
+<h3><code>stats</code> &mdash; Full Statistics</h3>
+<p>Displays a comprehensive statistical summary including severity distribution,
+top source IPs, time range, and per-file breakdown.</p>
+
+<h3><code>top-talkers</code> &mdash; Quick Summary</h3>
+<p>Renders four bar-chart sections: top source IPs, destination IPs, sources,
+and event IDs. A fast way to spot dominant actors.</p>
+<pre><code><span class="prompt">ILP [4312]></span> top-talkers
+<span class="output">--- Top Source IPs ---------------------------
+10.0.1.5              ████████████████████  412
+10.0.2.12             ███████████           287
+...
+--- Top Dest IPs ----------------------------
+8.8.8.8               ████████████████████  198
+1.1.1.1               ██████████████        142
+...</span></code></pre>
+
+<h3><code>severity</code> &mdash; Severity Breakdown</h3>
+<p>Bar chart showing Critical, High, Medium, Low, and Info counts with
+percentages. Severity labels are color-coded.</p>
+<pre><code><span class="prompt">ILP [4312]></span> severity
+<span class="output">--- Severity Breakdown --------------------------
+CRITICAL   ██                            42 (1.0%)
+HIGH       ████████                     312 (7.2%)
+MEDIUM     ██████████████              1,024 (23.7%)
+LOW        ████████████████████        1,891 (43.8%)
+INFO       ██████████████              1,043 (24.2%)</span></code></pre>
+
+<h3><code>heatmap</code> &mdash; 24-Hour Event Density</h3>
+<p>Vertical bar grid showing events per hour (00:00&ndash;23:00). Hours where
+&gt;30% of events are Critical or High severity are shown in red;
+otherwise cyan.</p>
+<pre><code><span class="prompt">ILP [4312]></span> heatmap
+<span class="output">--- 24-Hour Heatmap -----------------------------
+00:00  ████                     12
+01:00  ██                        8
+...
+09:00  ████████████████████    198
+10:00  ██████████████████      167
+...</span></code></pre>
+
+<h3><code>analyze &lt;engine&gt;</code> &mdash; Run Analysis</h3>
+<p>Run a built-in analysis engine on the current result set:</p>
+<ul>
+  <li><code>analyze failed-logins</code> &mdash; Failed login pattern analysis</li>
+  <li><code>analyze vpn-sessions</code> &mdash; VPN session reconstruction</li>
+  <li><code>analyze ipsec-tunnel</code> &mdash; IPsec tunnel status analysis</li>
+</ul>
+
+<h3><code>report &lt;type&gt; [--export &lt;path&gt;]</code> &mdash; Generate Report</h3>
+<p>Generate and optionally export a report:</p>
+<ul>
+  <li><code>report summary</code> / <code>report morning</code> &mdash; Summary or detailed morning report</li>
+  <li><code>report audit</code> / <code>report compliance</code> &mdash; Audit or compliance report</li>
+  <li><code>report timeline</code> &mdash; Chronological timeline report</li>
+</ul>
+<pre><code><span class="prompt">ILP [4312]></span> report summary --export /tmp/report.html</code></pre>
+
+<!-- ENRICHMENT -->
+<h2 id="enrichment">Enrichment &amp; Intelligence</h2>
+
+<h3><code>explain &lt;value&gt;</code></h3>
+<p>Context-aware lookup against embedded enrichment data: Windows Event IDs, NPS reason codes,
+FortiGate log ID ranges, Kerberos encryption types, and FortiGate subtypes.</p>
+<pre><code><span class="prompt">ILP [4312]></span> explain 4625
+<span class="output">Windows Event ID 4625: Failed logon
+  Significance: Brute force indicator when clustered.</span>
+
+<span class="prompt">ILP [4312]></span> explain 0x17
+<span class="output">Kerberos Encryption Type 0x17: RC4-HMAC-MD5
+  Significance: Legacy RC4-HMAC. Consider AES migration.</span></code></pre>
+
+<h3><code>ioc import &lt;path&gt;</code> / <code>ioc match</code> / <code>ioc export &lt;path&gt;</code></h3>
+<p>Import IOC values from a text/CSV file, scan events against them, and export matches.</p>
+<pre><code><span class="prompt">ILP [4312]></span> ioc import /tmp/iocs.txt
+<span class="output">Loaded 47 IOCs as $_ioc_iocs.txt</span>
+
+<span class="prompt">ILP [4312]></span> ioc match
+<span class="output">23 events matched 8/47 IOCs</span></code></pre>
+
+<h3><code>policy &lt;id&gt;</code> / <code>policy-stats</code></h3>
+<p>Look up FortiGate policy details from event data, or show event counts per policy ID.</p>
+
+<div class="page-break"></div>
+
+<!-- 7. DATA MANAGEMENT -->
+<h2 id="data-management">7. Data Management Commands</h2>
+
+<table>
+  <tr><th>Command</th><th>Description</th></tr>
+  <tr><td><code>load &lt;file&gt;</code></td><td>Load an additional log file into the session. Format is auto-detected. Events are merged and sorted by timestamp.</td></tr>
+  <tr><td><code>sources</code></td><td>List all loaded log sources with their detected format and event count.</td></tr>
+  <tr><td><code>fields</code></td><td>List all available field names across all loaded events, including Extra fields.</td></tr>
+  <tr><td><code>export &lt;fmt&gt; &lt;path&gt;</code></td><td>Export current filtered events. Formats: <code>csv</code>, <code>json</code>, <code>html</code>.</td></tr>
+  <tr><td><code>clear</code></td><td>Clear the active filter and restore the full event set. Previous state is saved for <code>undo</code>. Pinned events are preserved.</td></tr>
+  <tr><td><code>undo</code></td><td>Restore the previous filter state. Works like a browser back button &mdash; each filter or clear operation pushes to the undo stack.</td></tr>
+</table>
+
+<pre><code><span class="prompt">ILP [4312]></span> action:deny
+<span class="output">234 events</span>
+
+<span class="prompt">ILP (action:deny) [234]></span> undo
+<span class="output">Restored. 4,312 events</span>
+
+<span class="prompt">ILP [4312]></span> export csv /tmp/all-events.csv</code></pre>
+
+<!-- 8. SESSION COMMANDS -->
+<h2 id="session">8. Session Commands</h2>
+
+<h3><code>history</code> / <code>!N</code></h3>
+<p>Show the last 30 commands entered during this session.
+Use <code>!N</code> to re-execute command #N from history.</p>
+<pre><code><span class="prompt">ILP [4312]></span> history
+<span class="output">  1. action:deny AND severity:High
+  2. whois srcip
+  3. correlate srcip</span>
+
+<span class="prompt">ILP [4312]></span> !1
+<span class="output">>> action:deny AND severity:High
+87 events</span></code></pre>
+
+<h3><code>alias [name] [query]</code></h3>
+<p>Create query shortcuts. Without arguments, lists all defined aliases.
+Aliases are expanded before command processing, so they work with any command syntax.</p>
+<pre><code><span class="prompt">ILP [4312]></span> alias denied action:deny
+<span class="output">Alias 'denied' -> 'action:deny'</span>
+
+<span class="prompt">ILP [4312]></span> denied
+<span class="output">234 events</span>
+
+<span class="prompt">ILP [4312]></span> alias
+<span class="output">  denied -> action:deny</span></code></pre>
+
+<h3><code>pin</code> / <code>unpin</code> / <code>pinned</code></h3>
+<p>Pin saves the current filtered event set. Pinned events persist through
+<code>clear</code> operations and are indicated in the prompt. Use <code>pinned</code> to switch
+to viewing pinned events, and <code>undo</code> to return. Use <code>unpin</code> to release.</p>
+<pre><code><span class="prompt">ILP (action:deny) [234]></span> pin
+<span class="output">Pinned 234 events.</span>
+
+<span class="prompt">ILP (action:deny) [234] [pin:234]></span> clear
+<span class="output">Filter cleared.
+(234 pinned events still available)</span>
+
+<span class="prompt">ILP [4312] [pin:234]></span> pinned
+<span class="output">Switched to 234 pinned events</span>
+
+<span class="prompt">ILP (pinned) [234] [pin:234]></span> undo
+<span class="output">Restored. 4,312 events</span></code></pre>
+
+<h3><code>output &lt;format&gt;</code></h3>
+<p>Change the display format for event listings. Options:</p>
+<ul>
+  <li><code>Grid</code> (default) &mdash; Compact columnar display</li>
+  <li><code>Table</code> &mdash; Box-drawn table with borders</li>
+  <li><code>List</code> &mdash; One line per event, minimal formatting</li>
+</ul>
+
+<h3><code>columns &lt;field1,field2,...&gt;</code> / <code>columns reset</code></h3>
+<p>Set which fields to display in Grid, Table, and List output. Use <code>fields</code>
+to see available field names. Use <code>columns reset</code> to restore defaults.</p>
+<pre><code><span class="prompt">ILP [4312]></span> columns Timestamp,srcip,dstip,action,Message
+<span class="output">Display columns: Timestamp, srcip, dstip, action, Message</span>
+
+<span class="prompt">ILP [4312]></span> columns reset
+<span class="output">Columns reset to default.</span></code></pre>
+
+<h3><code>width &lt;field&gt; &lt;N&gt;</code></h3>
+<p>Set a custom column width for a specific field in Grid and Table output.
+Persists for the session.</p>
+<pre><code><span class="prompt">ILP [4312]></span> width Source 30
+<span class="output">Column width 'Source' set to 30</span></code></pre>
+
+<!-- JOURNAL -->
+<h2 id="journal">Investigation Journal &amp; Bookmarks</h2>
+
+<p>The journal automatically logs every command and its result. Add manual notes with
+<code>note</code>, tag individual events with <code>bookmark</code>.</p>
+
+<h3><code>note "&lt;text&gt;"</code></h3>
+<p>Add an analyst note to the journal.</p>
+<pre><code><span class="prompt">ILP [4312]></span> note "user jsmith appears to be source of lateral movement"
+<span class="output">Note added.</span></code></pre>
+
+<h3><code>journal</code> / <code>journal export &lt;path&gt;</code></h3>
+<p>View the investigation timeline, or export as markdown for incident reports.</p>
+
+<h3><code>bookmark &lt;N&gt; ["note"]</code> / <code>bookmarks</code></h3>
+<p>Tag individual events with notes. <code>bookmarks</code> lists them.
+<code>bookmarks show</code> displays full detail. <code>bookmarks export &lt;path&gt;</code> to CSV.</p>
+<pre><code><span class="prompt">ILP [4312]></span> bookmark 42 "initial compromise indicator"
+<span class="output">Bookmarked event #42: initial compromise indicator</span></code></pre>
+
+<!-- WATCHLIST -->
+<h2 id="watchlist">Watchlist</h2>
+
+<p>Define field values to flag across all output. Watched values are marked in
+<code>show</code>, <code>whois</code>, <code>map</code>, and grid output.</p>
+
+<pre><code><span class="prompt">ILP [4312]></span> watch srcip 10.0.1.5,10.0.1.8
+<span class="output">Watching srcip: 10.0.1.5, 10.0.1.8</span>
+
+<span class="prompt">ILP [4312] [W]></span> watch remove srcip 10.0.1.8
+<span class="prompt">ILP [4312] [W]></span> watch clear</code></pre>
+
+<div class="note">Watchlists can be persisted via <code>.ilp-config.json</code> or <code>session save</code>.</div>
+
+<!-- VARIABLES -->
+<h2 id="variables">Variables</h2>
+
+<p>Capture field values for reuse across queries and correlations.</p>
+
+<pre><code><span class="prompt">ILP (action:deny) [87]></span> $badips = select srcip
+<span class="output">$badips = 12 unique srcip values (first 5: 10.0.1.5, 10.0.1.8, ...)</span>
+
+<span class="prompt">ILP [4312]></span> srcip:$badips
+<span class="output">1,247 events</span>
+
+<span class="prompt">ILP [4312]></span> correlate srcip using $badips
+<span class="output">Correlated on 12 unique srcip values: 1,247 events</span>
+
+<span class="prompt">ILP [4312]></span> vars
+<span class="output">  $badips (12 values)</span></code></pre>
+
+<!-- COMPLIANCE -->
+<h2 id="compliance">Compliance &amp; Evidence Collection</h2>
+
+<p>Structured evidence collection for FFIEC compliance exams.</p>
+
+<pre><code><span class="prompt">ILP [4312]></span> evidence start "AC-2: Account Management"
+<span class="output">Evidence collection started for: AC-2: Account Management</span>
+
+<span class="prompt">ILP [4312] [E:AC-2]></span> EventID:4720 OR EventID:4726
+<span class="output">47 events</span>
+
+<span class="prompt">ILP (...) [47] [E:AC-2]></span> evidence capture "Account creation and deletion"
+<span class="output">Captured: Account creation and deletion (47 events)</span>
+
+<span class="prompt">ILP [4312] [E:AC-2]></span> evidence finish
+<span class="prompt">ILP [4312]></span> evidence export /tmp/ac2-evidence.html</code></pre>
+
+<!-- PLAYBOOKS -->
+<h2 id="playbooks">Playbooks</h2>
+
+<p>Repeatable investigation workflows stored as <code>.ilp-playbook</code> files.
+Pause points allow analyst review between sections.</p>
+
+<pre><code><span class="prompt">ILP [4312]></span> playbook list
+<span class="output">  daily-review    Standard morning log review  (12 commands)</span>
+
+<span class="prompt">ILP [4312]></span> playbook run daily-review
+<span class="prompt">ILP [4312]></span> playbook create my-investigation</code></pre>
+
+<!-- SESSION PERSISTENCE -->
+<h2 id="persistence">Session Persistence</h2>
+
+<p>Save and restore session state across multiple sessions. Aliases, watchlists, bookmarks,
+command history, and journal are preserved.</p>
+
+<pre><code><span class="prompt">ILP [4312]></span> session save /tmp/investigation.ilp-session
+<span class="output">Session saved.</span>
+
+<span class="comment"># Later, after reloading the same log files:</span>
+<span class="prompt">ILP [4312]></span> session restore /tmp/investigation.ilp-session
+<span class="output">Session restored (3 aliases, 2 watchlists)</span></code></pre>
+
+<div class="page-break"></div>
+
+<!-- WORKFLOWS -->
+<h2 id="workflows">Investigation Workflows</h2>
+
+<h3>Incident Response Walkthrough</h3>
+<p>Scenario: An alert fired for denied traffic from an internal IP. You need to
+determine the scope of the activity.</p>
+
+<pre><code><span class="comment"># 1. Launch with the firewall log</span>
+.\Invoke-LogParser.ps1 -Path .\fw.log -Interactive
+
+<span class="comment"># 2. Find the denied events</span>
+<span class="prompt">ILP [4312]></span> action:deny AND severity:High
+<span class="output">87 events</span>
+
+<span class="comment"># 3. Who's generating these?</span>
+<span class="prompt">ILP (action:deny AND severity:High) [87]></span> whois srcip
+<span class="output">--- srcip (3 unique) ---
+10.0.1.5    ████████████████████  52
+10.0.1.8    ██████████            28
+10.0.2.3    ███                    7</span>
+
+<span class="comment"># 4. See EVERYTHING those IPs did (the pivot)</span>
+<span class="prompt">ILP (...) [87]></span> correlate srcip
+<span class="output">Correlated on 3 unique srcip values: 1,247 events</span>
+
+<span class="comment"># 5. What actions did they take?</span>
+<span class="prompt">ILP (correlate:srcip) [1247]></span> whois action
+<span class="output">allow  ████████████████████  892
+deny   ████████              312
+dns    ███                    38
+ipsec  █                       5</span>
+
+<span class="comment"># 6. Focus the display on relevant fields</span>
+<span class="prompt">ILP (correlate:srcip) [1247]></span> columns srcip,dstip,action,dstport,Message
+
+<span class="comment"># 7. Remove noise</span>
+<span class="prompt">ILP (correlate:srcip) [1247]></span> exclude severity:Info
+<span class="output">892 events (excluded severity=Info)</span>
+
+<span class="comment"># 8. Look at the timeline</span>
+<span class="prompt">ILP (exclude severity:Info) [892]></span> timeline
+
+<span class="comment"># 9. Inspect a suspicious event</span>
+<span class="prompt">ILP (...) [892]></span> show 1
+
+<span class="comment"># 10. Compare two events</span>
+<span class="prompt">ILP (...) [892]></span> diff 1 15
+
+<span class="comment"># 11. Pin results and continue investigating</span>
+<span class="prompt">ILP (...) [892]></span> pin
+
+<span class="comment"># 12. Export for the incident report</span>
+<span class="prompt">ILP (...) [892]></span> report summary --export /tmp/incident.html</code></pre>
+
+<h3>Daily Log Review</h3>
+<pre><code><span class="comment"># Quick overview</span>
+<span class="prompt">ILP [4312]></span> severity
+<span class="prompt">ILP [4312]></span> heatmap
+<span class="prompt">ILP [4312]></span> top-talkers
+
+<span class="comment"># Drill into critical events</span>
+<span class="prompt">ILP [4312]></span> severity:Critical
+<span class="prompt">ILP (severity:Critical) [42]></span> whois Source
+<span class="prompt">ILP (severity:Critical) [42]></span> show 1
+
+<span class="comment"># Check for failed logins</span>
+<span class="prompt">ILP [4312]></span> analyze failed-logins
+
+<span class="comment"># Generate morning report</span>
+<span class="prompt">ILP [4312]></span> report morning --export /tmp/morning.html</code></pre>
+
+<div class="page-break"></div>
+
+<!-- 10. QUICK REFERENCE -->
+<h2 id="quick-ref">10. Quick Reference Card</h2>
+
+<div class="ref-card">
+  <div>
+    <strong>Inspection</strong>
+    <code>show &lt;N&gt;</code> &mdash; Full event detail<br>
+    <code>raw &lt;N&gt;</code> &mdash; Raw log line<br>
+    <code>context &lt;N&gt; [lines]</code> &mdash; Surrounding lines<br>
+    <code>diff &lt;N&gt; &lt;M&gt;</code> &mdash; Compare events<br>
+    <code>next</code> / <code>prev</code> &mdash; Page results<br>
+    <code>goto &lt;N&gt;</code> &mdash; Jump to page
+  </div>
+  <div>
+    <strong>Investigation</strong>
+    <code>whois &lt;field&gt;</code> &mdash; Value summary<br>
+    <code>search &lt;text&gt;</code> &mdash; Free-text search<br>
+    <code>correlate &lt;field&gt;</code> &mdash; Pivot<br>
+    <code>exclude &lt;f:v&gt;</code> &mdash; Remove matching<br>
+    <code>unique &lt;field&gt;</code> &mdash; Deduplicate<br>
+    <code>follow &lt;src&gt; -&gt; &lt;dst&gt;</code> &mdash; Lateral trace<br>
+    <code>highlight</code> / <code>unhighlight</code> &mdash; Highlight
+  </div>
+  <div>
+    <strong>Time-Based</strong>
+    <code>anchor &lt;N&gt; &lt;dur&gt;</code> &mdash; Around event<br>
+    <code>between &lt;s&gt; to &lt;e&gt;</code> &mdash; Time window<br>
+    <code>window &lt;dur&gt;</code> &mdash; Last N time<br>
+    <code>timeline [--severity]</code> &mdash; Histogram
+  </div>
+  <div>
+    <strong>Analysis &amp; Display</strong>
+    <code>stats</code> &mdash; Full statistics<br>
+    <code>top-talkers</code> &mdash; Quick IP summary<br>
+    <code>severity</code> &mdash; Severity breakdown<br>
+    <code>heatmap</code> &mdash; 24-hour density<br>
+    <code>map &lt;src&gt; -&gt; &lt;dst&gt;</code> &mdash; Connection map<br>
+    <code>analyze</code> / <code>report</code> &mdash; Analysis &amp; reports
+  </div>
+  <div>
+    <strong>Enrichment</strong>
+    <code>explain &lt;value&gt;</code> &mdash; Look up IDs/codes<br>
+    <code>ioc import|match|export</code> &mdash; IOC workflow<br>
+    <code>policy &lt;id&gt;</code> &mdash; Policy lookup<br>
+    <code>policy-stats</code> &mdash; Policy counts
+  </div>
+  <div>
+    <strong>Journal &amp; Bookmarks</strong>
+    <code>note "&lt;text&gt;"</code> &mdash; Analyst note<br>
+    <code>journal [export]</code> &mdash; View/export<br>
+    <code>bookmark &lt;N&gt;</code> &mdash; Tag event<br>
+    <code>bookmarks</code> &mdash; List/show/export
+  </div>
+  <div>
+    <strong>Watchlist &amp; Variables</strong>
+    <code>watch &lt;field&gt; &lt;vals&gt;</code> &mdash; Add watch<br>
+    <code>watchlist</code> &mdash; View watches<br>
+    <code>$name = select &lt;f&gt;</code> &mdash; Capture<br>
+    <code>vars</code> &mdash; List variables
+  </div>
+  <div>
+    <strong>Session &amp; Data</strong>
+    <code>history</code> / <code>!N</code> / <code>!!</code> &mdash; History<br>
+    <code>alias</code> / <code>pin</code> / <code>pinned</code> &mdash; Aliases &amp; pins<br>
+    <code>columns</code> / <code>output</code> / <code>width</code> &mdash; Display<br>
+    <code>undo</code> / <code>clear</code> &mdash; Navigation<br>
+    <code>load</code> / <code>sources</code> / <code>fields</code> &mdash; Data<br>
+    <code>export</code> / <code>copy</code> &mdash; Export
+  </div>
+  <div>
+    <strong>Compliance &amp; Automation</strong>
+    <code>evidence start|capture|finish</code><br>
+    <code>evidence export|list</code><br>
+    <code>playbook list|run|create</code><br>
+    <code>session save|restore|list</code><br>
+    <code>cmd1 ; cmd2</code> &mdash; Chaining
+  </div>
+</div>
+
+<div class="note">
+  <strong>Tip:</strong> The <code>correlate</code> command is the most powerful investigative tool.
+  Start by filtering to suspicious events, then correlate on a field like
+  <code>srcip</code> or <code>user</code> to see the full picture of what those entities did.
+  Use <code>undo</code> to backtrack at any point.
+</div>
+
+</body>
+</html>

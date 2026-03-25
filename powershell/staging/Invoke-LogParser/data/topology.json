@@ -1,0 +1,144 @@
+{
+    "_description": "Network topology for hub-and-spoke SD-WAN overlay with eBGP routing",
+    "_version": "1.0",
+    "sites": {
+        "009": {
+            "role": "hub",
+            "description": "Primary datacenter / hub",
+            "wan_links": ["fiber_primary", "fiber_secondary"],
+            "has_server_infra": true,
+            "is_dr_site": false,
+            "fortigate_model": "FG-200F",
+            "services": ["dc", "dns", "dhcp", "nps", "ca", "hyperv", "veeam", "fortimanager", "fortianalyzer", "zabbix"],
+            "notes": "All spoke-to-spoke traffic transits through this hub"
+        },
+        "012": {
+            "role": "dr_hub",
+            "description": "DR site / secondary hub",
+            "wan_links": ["cox_cable"],
+            "has_server_infra": true,
+            "is_dr_site": true,
+            "fortigate_model": "FG-100F",
+            "services": ["dc_replica", "hyperv_replica", "veeam_offsite"],
+            "notes": "Cox blocks ESP - TCP transport required for IPsec"
+        },
+        "001": {
+            "role": "spoke",
+            "description": "Main office",
+            "wan_links": ["fiber", "lte_backup"],
+            "has_server_infra": true,
+            "fortigate_model": "FG-80F",
+            "services": ["cash_recycler_server", "local_print"],
+            "notes": "Largest branch by user count"
+        },
+        "002": {
+            "role": "spoke",
+            "description": "Branch office",
+            "wan_links": ["cable", "lte_backup"],
+            "has_server_infra": false,
+            "fortigate_model": "FG-60F",
+            "services": [],
+            "notes": ""
+        },
+        "003": {
+            "role": "spoke",
+            "description": "Branch office",
+            "wan_links": ["cable", "lte_backup"],
+            "has_server_infra": false,
+            "fortigate_model": "FG-60F",
+            "services": [],
+            "notes": ""
+        },
+        "004": {
+            "role": "spoke",
+            "description": "Branch office",
+            "wan_links": ["fiber"],
+            "has_server_infra": false,
+            "fortigate_model": "FG-60F",
+            "services": [],
+            "notes": ""
+        },
+        "005": {
+            "role": "spoke",
+            "description": "Branch office",
+            "wan_links": ["cable", "lte_backup"],
+            "has_server_infra": false,
+            "fortigate_model": "FG-60F",
+            "services": [],
+            "notes": ""
+        }
+    },
+    "tunnels": {
+        "H012-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["012", "009"],
+            "transport": "tcp",
+            "members": 2,
+            "notes": "Cox ESP blocking requires TCP encapsulation"
+        },
+        "S001-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["001", "009"],
+            "transport": "udp",
+            "members": 2,
+            "notes": ""
+        },
+        "S002-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["002", "009"],
+            "transport": "udp",
+            "members": 2,
+            "notes": ""
+        },
+        "S003-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["003", "009"],
+            "transport": "udp",
+            "members": 2,
+            "notes": ""
+        },
+        "S004-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["004", "009"],
+            "transport": "udp",
+            "members": 1,
+            "notes": "Single WAN link - no aggregate"
+        },
+        "S005-H009": {
+            "type": "ipsec_aggregate",
+            "endpoints": ["005", "009"],
+            "transport": "udp",
+            "members": 2,
+            "notes": ""
+        }
+    },
+    "bgp": {
+        "009": { "as": 65009, "role": "route_reflector", "peers": ["012", "001", "002", "003", "004", "005"] },
+        "012": { "as": 65012, "role": "peer", "peers": ["009"] },
+        "001": { "as": 65001, "role": "peer", "peers": ["009"] },
+        "002": { "as": 65002, "role": "peer", "peers": ["009"] },
+        "003": { "as": 65003, "role": "peer", "peers": ["009"] },
+        "004": { "as": 65004, "role": "peer", "peers": ["009"] },
+        "005": { "as": 65005, "role": "peer", "peers": ["009"] }
+    },
+    "traffic_paths": {
+        "spoke_to_spoke": "via hub 009",
+        "spoke_to_internet": "local breakout with FortiGate inspection",
+        "spoke_to_dc": "via tunnel to hub 009",
+        "vpn_client": "terminates at hub 009",
+        "dr_replication": "012 to 009 via H012-H009 tunnel"
+    },
+    "ip_subnets": {
+        "009": { "lan": "10.9.0.0/16", "servers": "10.9.1.0/24", "mgmt": "10.9.254.0/24" },
+        "012": { "lan": "10.12.0.0/16", "servers": "10.12.1.0/24" },
+        "001": { "lan": "10.1.0.0/16" },
+        "002": { "lan": "10.2.0.0/16" },
+        "003": { "lan": "10.3.0.0/16" },
+        "004": { "lan": "10.4.0.0/16" },
+        "005": { "lan": "10.5.0.0/16" }
+    },
+    "maintenance_windows": {
+        "standard": { "day": "Sunday", "start": "01:00", "end": "05:00", "description": "Weekly maintenance window" },
+        "emergency": { "description": "As needed with CAB approval" }
+    }
+}

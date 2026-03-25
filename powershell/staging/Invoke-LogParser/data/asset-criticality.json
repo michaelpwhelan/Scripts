@@ -1,0 +1,54 @@
+{
+    "_description": "Asset criticality scoring rules for prioritizing alerts and anomalies",
+    "assetTypeWeights": {
+        "Server": 10,
+        "Domain Controller": 15,
+        "Network Device": 8,
+        "Firewall": 12,
+        "Switch": 6,
+        "Access Point": 4,
+        "Workstation": 5,
+        "Laptop": 5,
+        "Printer": 2,
+        "Phone": 2,
+        "Virtual Machine": 7,
+        "Unknown": 3
+    },
+    "serviceRoleWeights": {
+        "DC": 15,
+        "NPS": 12,
+        "CA": 12,
+        "HyperV": 10,
+        "Veeam": 8,
+        "DNS": 10,
+        "DHCP": 8,
+        "FileServer": 6,
+        "PrintServer": 3,
+        "WebServer": 7,
+        "DatabaseServer": 10,
+        "FortiManager": 10,
+        "FortiAnalyzer": 8,
+        "Zabbix": 7,
+        "Exchange": 9
+    },
+    "siteRoleWeights": {
+        "hub": 10,
+        "dr_hub": 8,
+        "spoke": 5
+    },
+    "criticalityLevels": {
+        "Critical": { "minScore": 25, "description": "Mission-critical infrastructure" },
+        "High": { "minScore": 15, "description": "Important infrastructure with limited redundancy" },
+        "Medium": { "minScore": 8, "description": "Standard infrastructure" },
+        "Low": { "minScore": 0, "description": "Low-impact devices" }
+    },
+    "specialAssets": {
+        "_description": "Override criticality for specific asset names or tags",
+        "patterns": [
+            { "field": "Name", "pattern": "DC-*", "level": "Critical", "reason": "Domain Controller" },
+            { "field": "Name", "pattern": "NPS-*", "level": "Critical", "reason": "RADIUS/NPS Server" },
+            { "field": "Name", "pattern": "CA-*", "level": "Critical", "reason": "Certificate Authority" },
+            { "field": "ServiceRole", "pattern": "DC", "level": "Critical", "reason": "Domain Controller" }
+        ]
+    }
+}

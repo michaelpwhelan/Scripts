@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4624</EventID>
+      <Version>2</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:00:01.1234567Z" />
+      <EventRecordID>100001</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-5-18</Data>
+      <Data Name="SubjectUserName">DC01$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="TargetUserSid">S-1-5-21-1234567890-123456789-1234567890-1001</Data>
+      <Data Name="TargetUserName">jsmith</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">10</Data>
+      <Data Name="LogonProcessName">User32</Data>
+      <Data Name="AuthenticationPackageName">Negotiate</Data>
+      <Data Name="WorkstationName">WKS-FINANCE01</Data>
+      <Data Name="LogonGuid">{00000000-0000-0000-0000-000000000001}</Data>
+      <Data Name="IpAddress">10.0.1.50</Data>
+      <Data Name="IpPort">49832</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4624</EventID>
+      <Version>2</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:05:00.0000000Z" />
+      <EventRecordID>100002</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-0-0</Data>
+      <Data Name="SubjectUserName">-</Data>
+      <Data Name="SubjectDomainName">-</Data>
+      <Data Name="TargetUserSid">S-1-5-21-1234567890-123456789-1234567890-500</Data>
+      <Data Name="TargetUserName">Administrator</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">3</Data>
+      <Data Name="LogonProcessName">NtLmSsp</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="WorkstationName">SRV-APP01</Data>
+      <Data Name="LogonGuid">{00000000-0000-0000-0000-000000000002}</Data>
+      <Data Name="IpAddress">10.0.2.10</Data>
+      <Data Name="IpPort">55021</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4625</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8010000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:10:00.0000000Z" />
+      <EventRecordID>100003</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-0-0</Data>
+      <Data Name="SubjectUserName">-</Data>
+      <Data Name="SubjectDomainName">-</Data>
+      <Data Name="TargetUserSid">S-1-0-0</Data>
+      <Data Name="TargetUserName">admin</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="Status">0xc000006d</Data>
+      <Data Name="FailureReason">%%2313</Data>
+      <Data Name="SubStatus">0xc000006a</Data>
+      <Data Name="LogonType">3</Data>
+      <Data Name="LogonProcessName">NtLmSsp</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="WorkstationName">UNKNOWN-PC</Data>
+      <Data Name="IpAddress">192.168.50.200</Data>
+      <Data Name="IpPort">0</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4625</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8010000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:10:05.0000000Z" />
+      <EventRecordID>100004</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-0-0</Data>
+      <Data Name="SubjectUserName">-</Data>
+      <Data Name="SubjectDomainName">-</Data>
+      <Data Name="TargetUserSid">S-1-0-0</Data>
+      <Data Name="TargetUserName">administrator</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="Status">0xc000006d</Data>
+      <Data Name="FailureReason">%%2313</Data>
+      <Data Name="SubStatus">0xc000006a</Data>
+      <Data Name="LogonType">10</Data>
+      <Data Name="LogonProcessName">User32</Data>
+      <Data Name="AuthenticationPackageName">Negotiate</Data>
+      <Data Name="WorkstationName">UNKNOWN-PC</Data>
+      <Data Name="IpAddress">192.168.50.200</Data>
+      <Data Name="IpPort">0</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4672</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>12548</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:05:01.0000000Z" />
+      <EventRecordID>100005</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-5-21-1234567890-123456789-1234567890-500</Data>
+      <Data Name="SubjectUserName">Administrator</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="PrivilegeList">SeSecurityPrivilege SeBackupPrivilege SeRestorePrivilege SeTakeOwnershipPrivilege SeDebugPrivilege SeSystemEnvironmentPrivilege SeLoadDriverPrivilege SeImpersonatePrivilege SeDelegateSessionUserImpersonatePrivilege SeEnableDelegationPrivilege</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4720</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>13824</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T09:00:00.0000000Z" />
+      <EventRecordID>100006</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">svc-backdoor</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="TargetSid">S-1-5-21-1234567890-123456789-1234567890-5001</Data>
+      <Data Name="SubjectUserSid">S-1-5-21-1234567890-123456789-1234567890-500</Data>
+      <Data Name="SubjectUserName">Administrator</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="PrivilegeList">-</Data>
+      <Data Name="UserPrincipalName">svc-backdoor@contoso.com</Data>
+      <Data Name="SamAccountName">svc-backdoor</Data>
+      <Data Name="DisplayName">Service Account Backup</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4740</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>13824</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T08:20:00.0000000Z" />
+      <EventRecordID>100007</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">jsmith</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="TargetSid">S-1-5-21-1234567890-123456789-1234567890-1001</Data>
+      <Data Name="SubjectUserName">DC01$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>1102</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>104</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x4020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T10:00:00.0000000Z" />
+      <EventRecordID>100008</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <UserData>
+      <LogFileCleared xmlns="http://manifests.microsoft.com/win/2004/08/windows/eventlog">
+        <SubjectUserName>Administrator</SubjectUserName>
+        <SubjectDomainName>CONTOSO</SubjectDomainName>
+        <SubjectLogonId>0x3e7</SubjectLogonId>
+      </LogFileCleared>
+    </UserData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>7045</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>0</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T09:30:00.0000000Z" />
+      <EventRecordID>100009</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="ServiceName">WindowsUpdateService</Data>
+      <Data Name="ImagePath">C:\ProgramData\svc\update.exe -k netsvcs</Data>
+      <Data Name="ServiceType">user mode service</Data>
+      <Data Name="StartType">auto start</Data>
+      <Data Name="AccountName">LocalSystem</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4624</EventID>
+      <Version>2</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T11:00:00.0000000Z" />
+      <EventRecordID>100010</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-5-18</Data>
+      <Data Name="SubjectUserName">DC01$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="TargetUserSid">S-1-5-21-1234567890-123456789-1234567890-1002</Data>
+      <Data Name="TargetUserName">mjones</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="LogonType">2</Data>
+      <Data Name="LogonProcessName">User32</Data>
+      <Data Name="AuthenticationPackageName">Negotiate</Data>
+      <Data Name="WorkstationName">DC01</Data>
+      <Data Name="LogonGuid">{00000000-0000-0000-0000-000000000003}</Data>
+      <Data Name="IpAddress">127.0.0.1</Data>
+      <Data Name="IpPort">0</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4625</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8010000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T12:00:00.0000000Z" />
+      <EventRecordID>100011</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-0-0</Data>
+      <Data Name="SubjectUserName">-</Data>
+      <Data Name="SubjectDomainName">-</Data>
+      <Data Name="TargetUserSid">S-1-0-0</Data>
+      <Data Name="TargetUserName">svc-sql</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="Status">0xc0000234</Data>
+      <Data Name="FailureReason">%%2307</Data>
+      <Data Name="SubStatus">0x0</Data>
+      <Data Name="LogonType">3</Data>
+      <Data Name="LogonProcessName">NtLmSsp</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="WorkstationName">SRV-DB01</Data>
+      <Data Name="IpAddress">10.0.3.20</Data>
+      <Data Name="IpPort">49200</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4672</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>12548</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T11:00:01.0000000Z" />
+      <EventRecordID>100012</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-5-21-1234567890-123456789-1234567890-1002</Data>
+      <Data Name="SubjectUserName">mjones</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="PrivilegeList">SeChangeNotifyPrivilege SeImpersonatePrivilege SeCreateGlobalPrivilege</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4624</EventID>
+      <Version>2</Version>
+      <Level>0</Level>
+      <Task>12544</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T13:00:00.0000000Z" />
+      <EventRecordID>100013</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="SubjectUserSid">S-1-0-0</Data>
+      <Data Name="SubjectUserName">-</Data>
+      <Data Name="SubjectDomainName">-</Data>
+      <Data Name="TargetUserSid">S-1-5-7</Data>
+      <Data Name="TargetUserName">ANONYMOUS LOGON</Data>
+      <Data Name="TargetDomainName">NT AUTHORITY</Data>
+      <Data Name="LogonType">3</Data>
+      <Data Name="LogonProcessName">NtLmSsp</Data>
+      <Data Name="AuthenticationPackageName">NTLM</Data>
+      <Data Name="WorkstationName">-</Data>
+      <Data Name="LogonGuid">{00000000-0000-0000-0000-000000000000}</Data>
+      <Data Name="IpAddress">-</Data>
+      <Data Name="IpPort">-</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4720</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>13824</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T14:00:00.0000000Z" />
+      <EventRecordID>100014</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">temp-contractor</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="TargetSid">S-1-5-21-1234567890-123456789-1234567890-5002</Data>
+      <Data Name="SubjectUserSid">S-1-5-21-1234567890-123456789-1234567890-1001</Data>
+      <Data Name="SubjectUserName">jsmith</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+      <Data Name="PrivilegeList">-</Data>
+      <Data Name="UserPrincipalName">temp-contractor@contoso.com</Data>
+      <Data Name="SamAccountName">temp-contractor</Data>
+      <Data Name="DisplayName">Temporary Contractor</Data>
+    </EventData>
+  </Event>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <System>
+      <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}" />
+      <EventID>4740</EventID>
+      <Version>0</Version>
+      <Level>0</Level>
+      <Task>13824</Task>
+      <Opcode>0</Opcode>
+      <Keywords>0x8020000000000000</Keywords>
+      <TimeCreated SystemTime="2026-03-18T15:00:00.0000000Z" />
+      <EventRecordID>100015</EventRecordID>
+      <Computer>DC01.contoso.com</Computer>
+      <Security />
+    </System>
+    <EventData>
+      <Data Name="TargetUserName">svc-sql</Data>
+      <Data Name="TargetDomainName">CONTOSO</Data>
+      <Data Name="TargetSid">S-1-5-21-1234567890-123456789-1234567890-1100</Data>
+      <Data Name="SubjectUserName">DC01$</Data>
+      <Data Name="SubjectDomainName">CONTOSO</Data>
+    </EventData>
+  </Event>
+</Events>
