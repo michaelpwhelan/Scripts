@@ -1,3 +1,0 @@
-"Host","ResolvedIP","ReverseDNS","PingStatus","PingSent","PingRecv","PingLossPct","PingMinMs","PingAvgMs","PingMaxMs","Port_443","TestedAt"
-"192.168.4.1","192.168.4.1","_gateway","Skipped","4","4","0","2","2","2","N/A","2026-03-14 22:19:50"
-"192.168.4.2","N/A","N/A","Unreachable","4","0","100","","","","N/A","2026-03-14 22:19:55"

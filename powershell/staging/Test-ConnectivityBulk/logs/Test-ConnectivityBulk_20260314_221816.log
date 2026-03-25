@@ -1,5 +1,0 @@
-[2026-03-14 22:18:16] [INFO] Starting Test-ConnectivityBulk
-[2026-03-14 22:18:16] [INFO] Received 1 target(s) from parameters/pipeline
-[2026-03-14 22:18:16] [INFO] Expanded CIDR 192.168.4.0/24 -> 254 host(s)
-[2026-03-14 22:18:16] [INFO] Workers: 10  |  Targets: 254
-[2026-03-14 22:18:16] [ERROR] Fatal error: Exception calling "CreateRunspacePool" with "4" argument(s): "Cannot process argument because the value of argument "host" is null. Change the value of argument "host" to a non-null value."
