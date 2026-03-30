@@ -716,7 +716,7 @@ function Get-RelevantEvents {
                     Level       = $levelName
                     TimeCreated = $e.TimeCreated
                     Provider    = $e.ProviderName
-                    Message     = $e.Message -replace '\s+', ' '
+                    Message     = ($e.Message -replace '\s+', ' ')
                 })
             }
         } catch [System.Exception] {
